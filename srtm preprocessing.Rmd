@@ -1,0 +1,41 @@
+---
+title: "Mapping North Africa"
+author: "Nick Gauthier"
+date: "June 2, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+```{r}
+library(tidyverse)
+library(raster)
+library(rasterVis)
+```
+
+
+
+## Elevation Data
+Get country boundaries for spain, portugal, and italy to mask out from elevation
+```{r}
+euro.mask <- rbind(getData('GADM', country = 'PRT', level = 0),
+                   getData('GADM', country = 'ESP', level = 0),
+                   getData('GADM', country = 'ITA', level = 0))
+```
+
+First download and mosaic 90m srtm tiles over the study area.
+```{r}
+srtm <- list.files(pattern = '*.tif', recursive = T) %>% 
+  lapply(raster) %>% 
+  do.call(merge, .) %>%
+  mask(euro.mask, inverse = T)
+```
+
+```{r}
+levelplot(srtm)
+```
+
+
