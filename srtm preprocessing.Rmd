@@ -13,7 +13,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(raster)
-library(rasterVis)
 ```
 
 
@@ -28,6 +27,20 @@ euro.mask <- rbind(getData('GADM', country = 'PRT', level = 0),
 
 First download and mosaic 90m srtm tiles over the study area.
 ```{r}
+
+getData('SRTM', lon = -8, lat = 35)
+getData('SRTM', lon = -3, lat = 35)
+getData('SRTM', lon = 2, lat = 35)
+getData('SRTM', lon = 7, lat = 35)
+getData('SRTM', lon = 12, lat = 35)
+getData('SRTM', lon = -8, lat = 40)
+getData('SRTM', lon = -3, lat = 40)
+getData('SRTM', lon = 2, lat = 40)
+getData('SRTM', lon = 7, lat = 40)
+getData('SRTM', lon = 12, lat = 40)
+
+
+
 srtm <- list.files(pattern = '*.tif', recursive = T) %>% 
   lapply(raster) %>% 
   do.call(merge, .) %>%
