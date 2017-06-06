@@ -45,10 +45,27 @@ srtm <- list.files(pattern = '*.tif', recursive = T) %>%
   lapply(raster) %>% 
   do.call(merge, .) %>%
   mask(euro.mask, inverse = T)
+
+writeRaster(srtm, 'srtm_na.tif')
+```
+```{r}
+plot(srtm)
 ```
 
 ```{r}
-levelplot(srtm)
+slope <- terrain(srtm, opt = 'slope')
+aspect <- terrain(srtm, opt = 'aspect')
+TPI <- terrain(srtm, opt = 'TPI')
+TRI <- terrain(srtm, opt = 'TRI')
+roughness <- terrain(srtm, opt = 'roughness')
+flowdir <- terrain(srtm, opt = 'flowdir')
+```
+
+
+```{r}
+as.data.frame(srtm, xy = T, na.rm = T) %>%
+  ggplot(aes(x, y, fill = value)) +
+  geom_raster()
 ```
 
 
