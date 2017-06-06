@@ -47,25 +47,29 @@ srtm <- list.files(pattern = '*.tif', recursive = T) %>%
   mask(euro.mask, inverse = T)
 
 writeRaster(srtm, 'srtm_na.tif')
+srtm <- raster('srtm_na.tif')
 ```
+
 ```{r}
 plot(srtm)
 ```
 
 ```{r}
-slope <- terrain(srtm, opt = 'slope')
-aspect <- terrain(srtm, opt = 'aspect')
-TPI <- terrain(srtm, opt = 'TPI')
-TRI <- terrain(srtm, opt = 'TRI')
-roughness <- terrain(srtm, opt = 'roughness')
-flowdir <- terrain(srtm, opt = 'flowdir')
+slope <- terrain(srtm, opt = 'slope', filename = 'slope.tif', overwrite = T)
+aspect <- terrain(srtm, opt = 'aspect', filename = 'aspect.tif', overwrite = T)
+TPI <- terrain(srtm, opt = 'TPI', filename = 'TPI.tif', overwrite = T)
+TRI <- terrain(srtm, opt = 'TRI', filename  = 'TRI.tif', overwrite = T)
+roughness <- terrain(srtm, opt = 'roughness', filename = 'roughness.tif', overwrite = T)
+flowdir <- terrain(srtm, opt = 'flowdir', filename = 'flowdir.tif', overwrite = T)
 ```
 
-
 ```{r}
-as.data.frame(srtm, xy = T, na.rm = T) %>%
-  ggplot(aes(x, y, fill = value)) +
-  geom_raster()
+plot(slope)
+plot(aspect)
+plot(TPI)
+plot(TRI)
+plot(roughness)
+plot(flowdir)
 ```
 
 
