@@ -14,39 +14,28 @@ knitr::opts_chunk$set(echo = TRUE)
 library(raster)
 library(tidyverse)
 library(ClimClass)
-```
-
-Install ClimClass Map from github
-```{r}
-library(devtools)
-install_github('ecor/ClimClassMap')
-library(ClimClassMap)
+library(parallel)
 ```
 
 
 ```{r}
-bioclim <- getData('worldclim', var = 'bio', res = 2.5) %>%
-  crop(extent(-10, 15, 30, 40))
-
 prec <- getData('worldclim', var = 'prec', res = 2.5) %>%
   crop(extent(-10, 15, 30, 40))
+
+prec <- mask(prec, na.clump, maskvalue = 15, inverse = T)
+
 tmin <- getData('worldclim', var = 'tmin', res = 2.5) %>%
   crop(extent(-10, 15, 30, 40)) %>%
+  mask(na.clump, maskvalue = 15, inverse = T) %>%
   `/`(10)
+
 tmax <- getData('worldclim', var = 'tmax', res = 2.5) %>%
   crop(extent(-10, 15, 30, 40)) %>%
+  mask(na.clump, maskvalue = 15, inverse = T) %>%
   `/`(10)
 ```
 
 ```{r}
-bioclim[[1]] %>% projectRaster(crs = "+proj=moll") %>% plot
-```
-
-```{r}
-pt <- matrix(c(0,34), ncol = 2)
-
-prec[10000]
-
 koeppen_map <- function(x){
   ifelse(is.na(prec[x][1]), 
          return(NA),
@@ -61,10 +50,10 @@ koeppen_map <- function(x){
 }
 
 
-koeppen_map(100)
+clim_class <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()-1) %>% 
+  unlist %>%
+  as.factor
 
-
-test <- sapply(1:ncell(prec), koeppen_map) %>% as.factor
-test
+setValues(prec[[1]], clim_class) %>% plot
 ```
 
