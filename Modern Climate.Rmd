@@ -15,6 +15,7 @@ library(raster)
 library(tidyverse)
 library(ClimClass)
 library(parallel)
+library(forcats)
 ```
 
 
@@ -57,5 +58,37 @@ clim_class <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()) %>%
   unlist %>%
   as.factor %>%
   setValues(prec[[1]], .)
+```
+
+```{r}
+class_names <- c(
+  BSh = 'Hot semi-arid',
+  BSk = 'Cold semi-arid',
+  BWh = 'Hot desert',
+  BWk = 'Cold desrt',
+  Csa = 'Hot-summer Mediterranean',
+  Csb = 'Warm-summer Mediterranean',
+  Dsb = 'Warm, dry-summer contiental',
+  Dsc = 'Dry-summer subarctic'
+)
+```
+
+
+```{r}
+clim_class %>% as.data.frame(xy = T, na.rm = T) %>%
+  mutate(class = recode_factor(prec1_VALUE, BSh = 'Hot semi-arid',
+  BSk = 'Cold semi-arid',
+  BWh = 'Hot desert',
+  BWk = 'Cold desrt',
+  Csa = 'Hot-summer Mediterranean',
+  Csb = 'Warm-summer Mediterranean',
+  Dsb = 'Warm, dry-summer contiental',
+  Dsc = 'Dry-summer subarctic')) %>%
+  ggplot(aes(x, y, fill = class)) +
+  geom_raster() +
+  labs(title = 'Present day climate of North Africa', subtitle = 'Based on WorldClim data') +
+  scale_fill_discrete(name = 'Köppen-Geiger classification') +
+  theme_void() +
+  coord_quickmap()
 ```
 
