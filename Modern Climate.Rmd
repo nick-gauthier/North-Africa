@@ -1,0 +1,24 @@
+---
+title: "Modern Climate"
+author: "Nick Gauthier"
+date: "6/7/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Present Day Climate in North Africa
+```{r}
+library(raster)
+library(tidyverse)
+```
+
+```{r}
+bioclim <- getData('worldclim', var = 'bio', res = 2.5) %>%
+  crop(extent(-10, 15, 30, 40))
+
+plot(bioclim[[1]])
+```
+
