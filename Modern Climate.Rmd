@@ -13,12 +13,58 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(raster)
 library(tidyverse)
+library(ClimClass)
 ```
+
+Install ClimClass Map from github
+```{r}
+library(devtools)
+install_github('ecor/ClimClassMap')
+library(ClimClassMap)
+```
+
 
 ```{r}
 bioclim <- getData('worldclim', var = 'bio', res = 2.5) %>%
   crop(extent(-10, 15, 30, 40))
 
-plot(bioclim[[1]])
+prec <- getData('worldclim', var = 'prec', res = 2.5) %>%
+  crop(extent(-10, 15, 30, 40))
+tmin <- getData('worldclim', var = 'tmin', res = 2.5) %>%
+  crop(extent(-10, 15, 30, 40)) %>%
+  `/`(10)
+tmax <- getData('worldclim', var = 'tmax', res = 2.5) %>%
+  crop(extent(-10, 15, 30, 40)) %>%
+  `/`(10)
+```
+
+```{r}
+bioclim[[1]] %>% projectRaster(crs = "+proj=moll") %>% plot
+```
+
+```{r}
+pt <- matrix(c(0,34), ncol = 2)
+
+prec[10000]
+
+koeppen_map <- function(x){
+  ifelse(is.na(prec[x][1]), 
+         return(NA),
+      return(data_frame(month = 1:12,
+           P = c(prec[x]),
+           Tx = c(tmax[x]),
+           Tn = c(tmin[x])) %>%
+    mutate(Tm = (Tx + Tn) / 2) %>%
+    koeppen_geiger(clim.resume_verbose = F) %>%
+    .$class %>%
+      as.character))
+}
+
+
+koeppen_map(100)
+
+
+test <- sapply(1:ncell(prec), koeppen_map) %>% as.factor
+test
 ```
 
