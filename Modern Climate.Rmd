@@ -20,19 +20,22 @@ library(parallel)
 
 ```{r}
 prec <- getData('worldclim', var = 'prec', res = 2.5) %>%
-  crop(extent(-10, 15, 30, 40))
+  crop(extent(-10, 15, 30, 38))
 
-prec <- mask(prec, na.clump, maskvalue = 15, inverse = T)
+na.clump <- clump(prec[[1]])
+prec <- mask(prec, na.clump, maskvalue = 6, inverse = T)
 
 tmin <- getData('worldclim', var = 'tmin', res = 2.5) %>%
-  crop(extent(-10, 15, 30, 40)) %>%
-  mask(na.clump, maskvalue = 15, inverse = T) %>%
+  crop(extent(-10, 15, 30, 38)) %>%
+  mask(na.clump, maskvalue = 6, inverse = T) %>%
   `/`(10)
 
 tmax <- getData('worldclim', var = 'tmax', res = 2.5) %>%
-  crop(extent(-10, 15, 30, 40)) %>%
-  mask(na.clump, maskvalue = 15, inverse = T) %>%
+  crop(extent(-10, 15, 30, 38)) %>%
+  mask(na.clump, maskvalue = 6, inverse = T) %>%
   `/`(10)
+
+plot(prec[[1]])
 ```
 
 ```{r}
@@ -50,10 +53,9 @@ koeppen_map <- function(x){
 }
 
 
-clim_class <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()-1) %>% 
+clim_class <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()) %>% 
   unlist %>%
-  as.factor
-
-setValues(prec[[1]], clim_class) %>% plot
+  as.factor %>%
+  setValues(prec[[1]], .)
 ```
 
