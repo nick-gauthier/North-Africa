@@ -22,20 +22,22 @@ library(parallel)
 
 
 ```{r}
+bbox <- extent(-10, 20, 30, 38)
+
 prec <- getData('worldclim', var = 'prec', res = 2.5) %>%
-  crop(extent(-10, 15, 30, 38))
+  crop(bbox)
 
 na.clump <- clump(prec[[1]])
-prec <- mask(prec, na.clump, maskvalue = 6, inverse = T)
+prec <- mask(prec, na.clump, maskvalue = 7, inverse = T)
 
 tmin <- getData('worldclim', var = 'tmin', res = 2.5) %>%
-  crop(extent(-10, 15, 30, 38)) %>%
-  mask(na.clump, maskvalue = 6, inverse = T) %>%
+  crop(bbox) %>%
+  mask(na.clump, maskvalue = 7, inverse = T) %>%
   `/`(10)
 
 tmax <- getData('worldclim', var = 'tmax', res = 2.5) %>%
-  crop(extent(-10, 15, 30, 38)) %>%
-  mask(na.clump, maskvalue = 6, inverse = T) %>%
+  crop(bbox) %>%
+  mask(na.clump, maskvalue = 7, inverse = T) %>%
   `/`(10)
 ```
 
