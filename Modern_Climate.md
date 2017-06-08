@@ -1,31 +1,62 @@
----
-title: "Modern Climate"
-author: "Nick Gauthier"
-date: "6/7/2017"
-output: 
-  html_document: 
-    highlight: pygments
-    keep_md: yes
----
+# Modern Climate
+Nick Gauthier  
+6/7/2017  
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
+
 
 ## Present Day Climate in North Africa
-```{r}
+
+```r
 library(raster)
+```
+
+```
+## Loading required package: sp
+```
+
+```r
 library(tidyverse)
+```
+
+```
+## Loading tidyverse: ggplot2
+## Loading tidyverse: tibble
+## Loading tidyverse: tidyr
+## Loading tidyverse: readr
+## Loading tidyverse: purrr
+## Loading tidyverse: dplyr
+```
+
+```
+## Conflicts with tidy packages ----------------------------------------------
+```
+
+```
+## extract(): tidyr, raster
+## filter():  dplyr, stats
+## lag():     dplyr, stats
+## select():  dplyr, raster
+```
+
+```r
 library(ClimClass)
 library(parallel)
 ```
 
 
-```{r}
+
+```r
 prec <- getData('worldclim', var = 'prec', res = 2.5) %>%
   crop(extent(-10, 15, 30, 38))
 
 na.clump <- clump(prec[[1]])
+```
+
+```
+## Loading required namespace: igraph
+```
+
+```r
 prec <- mask(prec, na.clump, maskvalue = 6, inverse = T)
 
 tmin <- getData('worldclim', var = 'tmin', res = 2.5) %>%
@@ -39,7 +70,8 @@ tmax <- getData('worldclim', var = 'tmax', res = 2.5) %>%
   `/`(10)
 ```
 
-```{r}
+
+```r
 koeppen_map <- function(x){
   ifelse(is.na(prec[x][1]), 
          return(NA),
@@ -60,7 +92,8 @@ clim_class <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()) %>%
   setValues(prec[[1]], .)
 ```
 
-```{r}
+
+```r
 class_names <- c(
   BSh = 'Hot semi-arid',
   BSk = 'Cold semi-arid',
@@ -74,7 +107,8 @@ class_names <- c(
 ```
 
 
-```{r}
+
+```r
 clim_class %>% 
   as.data.frame(xy = T, na.rm = T) %>%
   mutate(class = recode_factor(prec1_VALUE, BSh = 'Hot semi-arid',
@@ -92,4 +126,6 @@ clim_class %>%
   theme_void() +
   coord_quickmap()
 ```
+
+![](Modern_Climate_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
 
