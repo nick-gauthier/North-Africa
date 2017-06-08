@@ -72,14 +72,15 @@ class_names <- c(
 
 
 ```{r}
-clim_class %>% as.data.frame(xy = T, na.rm = T) %>%
+clim_class %>% 
+  as.data.frame(xy = T, na.rm = T) %>%
   mutate(class = recode_factor(prec1_VALUE, BSh = 'Hot semi-arid',
   BSk = 'Cold semi-arid',
   BWh = 'Hot desert',
   BWk = 'Cold desrt',
   Csa = 'Hot-summer Mediterranean',
   Csb = 'Warm-summer Mediterranean',
-  Dsb = 'Warm, dry-summer contiental',
+  Dsb = 'Warm, dry-summer continental',
   Dsc = 'Dry-summer subarctic')) %>%
   ggplot(aes(x, y, fill = class)) +
   geom_raster() +
