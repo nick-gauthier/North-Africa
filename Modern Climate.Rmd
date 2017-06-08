@@ -15,7 +15,6 @@ library(raster)
 library(tidyverse)
 library(ClimClass)
 library(parallel)
-library(forcats)
 ```
 
 
@@ -35,8 +34,6 @@ tmax <- getData('worldclim', var = 'tmax', res = 2.5) %>%
   crop(extent(-10, 15, 30, 38)) %>%
   mask(na.clump, maskvalue = 6, inverse = T) %>%
   `/`(10)
-
-plot(prec[[1]])
 ```
 
 ```{r}
