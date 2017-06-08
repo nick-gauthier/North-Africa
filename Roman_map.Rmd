@@ -1,0 +1,82 @@
+---
+title: "Mapping Roman North Africa"
+author: "Nick"
+date: "6/8/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(sp)
+library(rgdal)
+```
+
+Let's get some shapefiles from the Antiquity A la Carte application, courtesy of the Ancient World Mapping Project.
+We'll use thise code to pull the shapefiles directly from the website.
+
+```{r}
+# source: https://www.r-bloggers.com/an-r-function-to-download-shapefiles/
+download.shapefile<-function(shape_url,layer,outfile=layer)
+{
+  #written by: jw hollister
+  #Oct 10, 2012
+ 
+  #set-up/clean-up variables
+  if(length(grep("/$",shape_url))==0)
+  {
+    shape_url<-paste(shape_url,"/",sep="")
+  }
+  #creates vector of all possible shapefile extensions
+  shapefile_ext<-c(".shp",".shx",".dbf",".prj",".sbn",".sbx",
+                   ".shp.xml",".fbn",".fbx",".ain",".aih",".ixs",
+                   ".mxs",".atx",".cpg")
+ 
+  #Check which shapefile files exist
+  if(require(RCurl))
+  {
+    xurl<-getURL(shape_url)
+    xlogic<-NULL
+    for(i in paste(layer,shapefile_ext,sep=""))
+    {
+      xlogic<-c(xlogic,grepl(i,xurl))
+    }
+ 
+    #Set-up list of shapefiles to download
+    shapefiles<-paste(shape_url,layer,shapefile_ext,sep="")[xlogic]
+    #Set-up output file names
+    outfiles<-paste(outfile,shapefile_ext,sep="")[xlogic]   }
+    #Download all shapefiles
+    if(sum(xlogic)>0)
+    {
+      for(i in 1:length(shapefiles))
+      {
+        download.file(shapefiles[i],outfiles[i],
+                      method="auto",mode="wb")
+      }
+      } else
+      {
+      stop("An Error has occured with the input URL
+            or name of shapefile")
+    }
+}
+```
+
+```{r}
+aqueducts <- download.shapefile('http://awmc.unc.edu/awmc/map_data/shapefiles/aqueducts/', 'aqueducts')
+```
+
+```{r}
+library(tidyverse)
+library(rgdal)
+```
+```{r}
+roads <- readOGR('Roman Road Network (version 2008)/roads/') %>%
+  spTransform(CRS('+proj=longlat')) %>%
+  crop(extent(-10, 20, 25, 38))
+
+plot(roads)
+```
+
+
