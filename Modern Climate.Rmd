@@ -84,8 +84,10 @@ clim_class %>%
 
 # Land Use
 ```{r}
+modis_colors <- c('#444f89', '#016400', '#018200', '#97bf47', '#02dc00', '#00ff00', '#92ae2f',
+                  '#dcce00', '#ffad00', '#fffbc3', '#8c4809', '#f7a5ff', '#ffc7ae', '#efefe8', '#00ffff')
 
-recode_factor()
+
 
 LC2012 <- raster('LC_5min_global_2012.tif') %>%
   crop(bbox)  %>%
@@ -123,9 +125,33 @@ plot(LC2001)
 LC2012
 ```
 ```{r}
-avhrr <- raster('AVHRR_1km_LANDCOVER_1981_1994.GLOBAL.tif') %>%
-  crop(bbox)
+avhrr_colors <- c('#444f89', '#016400', '#018200', '#97bf47', '#02dc00', '#00ff00', '#92ae2f',
+                  '#dcce00', '#ffad00', '#fffbc3', '#8c4809', '#f7a5ff', '#ffc7ae', '#efefe8', '#00ffff')
 
-plot(avhrr)
+avhrr <- raster('AVHRR_1km_LANDCOVER_1981_1994.GLOBAL.tif') %>%
+  crop(bbox) %>%
+  as.data.frame(xy = T) %>%
+  mutate(class = recode_factor(AVHRR_1km_LANDCOVER_1981_1994.GLOBAL,
+                               `0` = 'Water',
+                               `1` = 'Evergreen Needleleaf forest',
+                               `2` = 'Evergreen Broadleaf forest',
+                               `3` = 'Deciduous Needleleaf forest',
+                               `4` = 'Deciduous Broadleaf forest',
+                               `5` = 'Mixed forest',
+                               `6` = 'Woodland',
+                               `7` = 'Wooded grassland',
+                               `8` = 'Closed shrubland',
+                               `9` = 'Open shrubland',
+                               `10` = 'Grasslands',
+                               `11` = 'Cropland',
+                               `12` = 'Bare ground',
+                               `13` = 'Permanent snow or ice',
+                               `14` = 'Urban and built-up'))
+
+ggplot(avhrr, aes(x, y, fill = class)) +
+  geom_raster() +
+  coord_quickmap() +
+  scale_fill_manual(values = avhrr_colors) +
+  theme_void()
 ```
 
