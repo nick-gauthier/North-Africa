@@ -74,7 +74,7 @@ library(rgdal)
 ```{r}
 roads <- readOGR('Roman Road Network (version 2008)/roads/') %>%
   spTransform(CRS('+proj=longlat')) %>%
-  crop(extent(-10, 20, 25, 38))
+  crop(extent(-10, 20, 30, 38))
 
 plot(roads)
 ```
