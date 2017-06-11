@@ -83,47 +83,7 @@ clim_class %>%
 ```
 
 # Land Use
-```{r}
-modis_colors <- c('#444f89', '#016400', '#018200', '#97bf47', '#02dc00', '#00ff00', '#92ae2f',
-                  '#dcce00', '#ffad00', '#fffbc3', '#8c4809', '#f7a5ff', '#ffc7ae', '#efefe8', '#00ffff')
 
-
-
-LC2012 <- raster('LC_5min_global_2012.tif') %>%
-  crop(bbox)  %>%
-  as.data.frame(xy = T) %>%
-  mutate(class = recode_factor(LC_5min_global_2012,
-                               `0` = 'Water',
-                               `1` = 'Evergreen Needleleaf forest',
-                               `2` = 'Evergreen Broadleaf forest',
-                               `3` = 'Deciduous Needleleaf forest',
-                               `4` = 'Deciduous Broadleaf forest',
-                               `5` = 'Mixed forest',
-                               `6` = 'Closed shrublands',
-                               `7` = 'Open shrublands',
-                               `8` = 'Woody savannas',
-                               `9` = 'Savannas',
-                               `10` = 'Grasslands',
-                               `11` = 'Permanent wetlands',
-                               `12` = 'Croplands',
-                               `13` = 'Urban and built-up',
-                               `14` = 'Cropland/Natural vegetation mosaic',
-                               `15` = 'Snow and ice',
-                               `16` = 'Barren or sparsely vegetated'))
-
-ggplot(LC2012, aes(x, y, fill = class)) +
-  geom_raster() +
-  theme_void() +
-  coord_quickmap()
-
-LC2001 <- raster('LC_5min_global_2001.tif') %>%
-  crop(bbox)
-
-
-plot(LC2012)
-plot(LC2001)
-LC2012
-```
 ```{r}
 avhrr_colors <- c('#444f89', '#016400', '#018200', '#97bf47', '#02dc00', '#00ff00', '#92ae2f',
                   '#dcce00', '#ffad00', '#fffbc3', '#8c4809', '#f7a5ff', '#ffc7ae', '#efefe8', '#00ffff')

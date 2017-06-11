@@ -43,7 +43,7 @@ getData('SRTM', lon = 12, lat = 40)
 
 srtm <- list.files(pattern = '*.tif', recursive = T) %>% 
   lapply(raster) %>% 
-  do.call(merge, .) %>%
+  do.call(merge, .) #%>%
   mask(euro.mask, inverse = T)
 
 writeRaster(srtm, 'srtm_na.tif')
