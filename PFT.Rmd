@@ -1,0 +1,34 @@
+---
+title: "Potential PFT"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(raster)
+library(mgcv)
+```
+
+
+```{r}
+library(ncdf4)
+pft <- nc_open('mksrf_pft.081008.nc')
+
+pft$var
+%>% ncvar_get
+pft
+plot(pft[[1]])
+```
+
+```{r}
+wc <- raster::getData('worldclim', var = 'bio', res = 5)
+
+plot(wc[[1]])
+```
+
+```{r}
+srtm <- raster('~/gdrive/Data/SRTM_1km.tif')
+
+elev <- srtm %>% aggregate(pft)
+```
+
