@@ -9,68 +9,55 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 ```{r}
-library(sp)
-library(rgdal)
-```
-
-Let's get some shapefiles from the Antiquity A la Carte application, courtesy of the Ancient World Mapping Project.
-We'll use thise code to pull the shapefiles directly from the website.
-
-```{r}
-# source: https://www.r-bloggers.com/an-r-function-to-download-shapefiles/
-download.shapefile<-function(shape_url,layer,outfile=layer)
-{
-  #written by: jw hollister
-  #Oct 10, 2012
- 
-  #set-up/clean-up variables
-  if(length(grep("/$",shape_url))==0)
-  {
-    shape_url<-paste(shape_url,"/",sep="")
-  }
-  #creates vector of all possible shapefile extensions
-  shapefile_ext<-c(".shp",".shx",".dbf",".prj",".sbn",".sbx",
-                   ".shp.xml",".fbn",".fbx",".ain",".aih",".ixs",
-                   ".mxs",".atx",".cpg")
- 
-  #Check which shapefile files exist
-  if(require(RCurl))
-  {
-    xurl<-getURL(shape_url)
-    xlogic<-NULL
-    for(i in paste(layer,shapefile_ext,sep=""))
-    {
-      xlogic<-c(xlogic,grepl(i,xurl))
-    }
- 
-    #Set-up list of shapefiles to download
-    shapefiles<-paste(shape_url,layer,shapefile_ext,sep="")[xlogic]
-    #Set-up output file names
-    outfiles<-paste(outfile,shapefile_ext,sep="")[xlogic]   }
-    #Download all shapefiles
-    if(sum(xlogic)>0)
-    {
-      for(i in 1:length(shapefiles))
-      {
-        download.file(shapefiles[i],outfiles[i],
-                      method="auto",mode="wb")
-      }
-      } else
-      {
-      stop("An Error has occured with the input URL
-            or name of shapefile")
-    }
-}
-```
-
-```{r}
-aqueducts <- download.shapefile('http://awmc.unc.edu/awmc/map_data/shapefiles/aqueducts/', 'aqueducts')
-```
-
-```{r}
 library(tidyverse)
-library(rgdal)
+library(stringr)
+library(pleiades)
+library(raster)
+library(rasterVis)
 ```
+
+Import SRTM basemap
+```{r}
+bbox <- extent(-10, 20, 28, 38)
+srtm <- raster('Data/SRTM_NE_250m_TIF/SRTM_NE_250m.tif') %>%
+  crop(bbox)
+
+gplot(srtm) +
+  geom_raster(aes(fill = value)) +
+  coord_fixed()
+
+```
+
+
+```{r}
+places <- pl_search_places() %>%
+  filter(locationPrecision == 'precise') %>%
+  select(title, type = featureTypes, description, 
+         lon = reprLong, lat = reprLat, 
+         periods = timePeriods, minDate, maxDate, id, tags) %>%
+  filter(between(lat, 28, 38) & between(lon, -10, 20)) %>%
+  collect  %>%
+  filter(str_detect(periods, 'R')) %>%
+  print
+
+
+villas <- filter(places, str_detect(type, 'villa'))
+mines <- filter(places, str_detect(type, 'mine'))
+settlements <- filter(places, str_detect(type,'settlement'))
+springs <- filter(places, str_detect(type, 'spring'))
+estates <- filter(places, str_detect(type, 'estate'))
+oases <- filter(places, str_detect(type, 'oasis'))
+
+major <- settlements %>% filter(str_detect(tags, 'major=1'))
+
+gplot(srtm) +
+  geom_raster(aes(fill = value)) +
+  geom_point(data = major, aes(x = lon, y = lat)) +
+  coord_fixed()
+
+```
+
+
 ```{r}
 roads <- readOGR('Roman Road Network (version 2008)/roads/') %>%
   spTransform(CRS('+proj=longlat')) %>%
@@ -78,5 +65,8 @@ roads <- readOGR('Roman Road Network (version 2008)/roads/') %>%
 
 plot(roads)
 ```
+
+
+
 
 
