@@ -23,6 +23,7 @@ library(parallel)
 
 ```{r}
 bbox <- extent(-10, 20, 30, 38)
++proj=aea +lat_1=31.333333333333332 +lat_2=36.666666666666664 +lon_0=5
 
 prec <- getData('worldclim', var = 'prec', res = 2.5) %>%
   crop(bbox)
@@ -41,7 +42,7 @@ tmax <- getData('worldclim', var = 'tmax', res = 2.5) %>%
   `/`(10)
 ```
 
-```{r}
+```{r cache = T }
 koeppen_map <- function(x){
   ifelse(is.na(prec[x][1]), 
          return(NA),
@@ -56,7 +57,7 @@ koeppen_map <- function(x){
 }
 
 
-clim_class <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()) %>% 
+clim_class1 <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()) %>% 
   unlist %>%
   as.factor %>%
   setValues(prec[[1]], .)
@@ -64,7 +65,7 @@ clim_class <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()) %>%
 
 
 ```{r}
-clim_class %>% 
+clim_class1 %>% 
   as.data.frame(xy = T, na.rm = T) %>%
   mutate(class = recode_factor(prec1_VALUE, BSh = 'Hot semi-arid',
   BSk = 'Cold semi-arid',
@@ -80,6 +81,43 @@ clim_class %>%
   scale_fill_discrete(name = 'Köppen-Geiger classification') +
   theme_void() +
   coord_quickmap()
+```
+Now try again with chirps and modis data.
+  
+```{r}
+mod_chirps <- list.files('~/gdrive/Data/MOD11C3v6.0-CHIRPSv2.0_MONTHLY_03m/', full.names = T) %>%
+  stack %>%
+  crop(bbox)
+mod_chirps[mod_chirps[] == -9999] <- NA
+plot(mod_chirps[[1]])
+
+prec <- mod_chirps[[1:12]]
+
+tmax <- mod_chirps[[13:24]]
+
+tmin <- mod_chirps[[37:48]]
+
+clim_class2 <- mclapply(1:ncell(prec), koeppen_map, mc.cores = detectCores()) %>% 
+  unlist %>%
+  as.factor %>%
+  setValues(prec[[1]], .)
+clim_class2 %>% 
+  as.data.frame(xy = T, na.rm = T) %>%
+  mutate(class = recode_factor(CHIRPSv2.0_Precip_Month_01_03m_VALUE, BSh = 'Hot semi-arid',
+  BSk = 'Cold semi-arid',
+  BWh = 'Hot desert',
+  BWk = 'Cold desrt',
+  Csa = 'Hot-summer Mediterranean',
+  Csb = 'Warm-summer Mediterranean',
+  Dsb = 'Warm, dry-summer continental',
+  Dsc = 'Dry-summer subarctic')) %>%
+  ggplot(aes(x, y, fill = class)) +
+  geom_raster() +
+  labs(title = 'Present day climate of North Africa', subtitle = 'Based on WorldClim data') +
+  scale_fill_discrete(name = 'Köppen-Geiger classification') +
+  theme_void() +
+  coord_quickmap()
+```
 ```
 
 # Land Use
