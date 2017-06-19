@@ -15,14 +15,14 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Present Day Climate in North Africa
 ```{r}
 library(raster)
+library(rasterVis)
 library(tidyverse)
 library(ClimClass)
-library(parallel)
 ```
 
 
 ```{r}
-bbox <- extent(-10, 20, 30, 38)
+bbox <- extent(-10, 20, 28, 38)
 +proj=aea +lat_1=31.333333333333332 +lat_2=36.666666666666664 +lon_0=5
 
 prec <- getData('worldclim', var = 'prec', res = 2.5) %>%
@@ -118,7 +118,86 @@ clim_class2 %>%
   theme_void() +
   coord_quickmap()
 ```
+
+
+Growing degree days
+```{r}
+levelplot(tmax)
+month.days <- c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349)
+
+tmax.dat <- tmax %>% 
+  raster::as.data.frame(xy = T, na.rm = T) %>%
+  gather(month, value, 3:14) %>%
+  mutate(doy = rep(month.days, each = 84103))
+
+tmax.dat$cell <- cellFromXY(tmax, as.matrix(tmax.dat[,1:2])) %>% as.factor
+
+tmax.dat <- getValues(tmax)
+colnames(tmax.dat) <- month.abb
+
+library(mgcv)
+library(pbapply)
+
+tmax.out <- pbapply(tmax.dat, 1, function(x){
+    if(any(is.na(x))){return(rep(NA, 365))} else{
+      dat <- data.frame(doy =  c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349),
+                        tmax = x)
+      mod <- gam(tmax ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366)), data = dat)
+      return(predict.gam(mod, data.frame(doy = 1:365)))
+    }
+}) %>% t
+tmax.out
+
+tmax.daily <- tmax[[rep(1, 365)]] %>% brick %>% setValues(tmax.out)
+levelplot(tmax.daily[[month.days]] - tmax)
+tmin.dat <- getValues(tmin)
+colnames(tmin.dat) <- month.abb
+tmin.out <- pbapply(tmin.dat, 1, function(x){
+    if(any(is.na(x))){return(rep(NA, 365))} else{
+      dat <- data.frame(doy =  c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349),
+                        tmin = x)
+      mod <- gam(tmin ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366)), data = dat)
+      return(predict.gam(mod, data.frame(doy = 1:365)))
+    }
+}) %>% t
+tmin.daily <- tmin[[rep(1, 365)]] %>% brick %>% setValues(tmin.out)
+
+tmean.daily <- (tmin.daily + tmax.daily) / 2
+max(tmean.daily - 5, 0)
+
+gdd <- tmean.daily %>% reclassify(c(-Inf, 5, 0)) %>% sum
+levelplot(gdd)
+gdd.index <- 1 / (1 + exp(0.0052 * (1334 - gdd)))
+levelplot(gdd.index)
 ```
+water demand
+```{r}
+library(SPEI)
+lats <- tmin[[1]] %>% coordinates %>% .[,2] %>% setValues(tmin[[1]], .)
+plot(lats)
+
+hargreaves((tmin %>% getValues %>% t), (tmax %>% getValues %>% t), lat = rep(33, 120000), na.rm = T) %>%
+  t %>%
+  setValues(tmin, .) %>%
+  levelplot
+
+edit(hargreaves)
+thornthwaite((((tmax + tmin) / 2) %>% getValues %>% t), lat = (lats %>% getValues), na.rm = T) %>%
+  t %>%
+  setValues(tmin, .) %>%
+  levelplot
+
+alpha <- raster('~/Downloads/ALPHA/alpha/') %>% projectRaster(tmin[[1]])/100
+plot(alpha)
+alpha.index <- 1 / (1 + exp(14.705 * (0.3295 - alpha)))
+plot(alpha)
+```
+Soil Chemistry
+```{r}
+ph <- raster('~/Downloads/PHIHOX_M_sl4_250m_ll.tif') / 10
+carbon <- raster('~/Downloads/ORCDRC_M_sl4_250m_ll.tif')
+```
+
 
 # Land Use
 
