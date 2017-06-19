@@ -9,11 +9,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 ```{r}
+library(raster)
+library(rasterVis)
 library(tidyverse)
 library(stringr)
 library(pleiades)
-library(raster)
-library(rasterVis)
 ```
 
 Import SRTM basemap
@@ -22,10 +22,9 @@ bbox <- extent(-10, 20, 28, 38)
 srtm <- raster('Data/SRTM_NE_250m_TIF/SRTM_NE_250m.tif') %>%
   crop(bbox)
 
-gplot(srtm) +
-  geom_raster(aes(fill = value)) +
-  coord_fixed()
+slope <- terrain(srtm, unit = 'degrees')
 
+plot(srtm)
 ```
 
 
@@ -67,6 +66,53 @@ plot(roads)
 ```
 
 
+```{r t(ransition}
+library(gdistance)
+
+altDiff <- function(x){x[2] - x[1]}
+hd <- transition(srtm, altDiff, 8, symm=FALSE)
+adj <- adjacent(srtm, cells=1:ncell(srtm), pairs=TRUE, directions=8)
+```
+
+Create conductance matrix with geocorrection for lcps
+```{r lcp_conductance}
+slope.c <- geoCorrection(hd, type = 'c')
+speed.c <- slope.c
+speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))
+Conductance.c <- geoCorrection(speed.c, type = 'c')
+rm(slope.c, speed.c)
+```
+
+```{r}
+sites <- major %>%
+  select(lon, lat) %>%
+  as.matrix
+
+acc <- accCost(Conductance.c, sites) %>%
+  mask(srtm)
+
+plot(acc/3600<3)
+```
+
+
+Create conductance matrix with geocorrection for random walks
+```{r randomwalk_conductance}
+slope.r <- geoCorrection(hd, type = 'r', scl =T)
+speed.r <- slope.r
+speed.r[adj] <- 6 * exp(-3.5 * abs(slope.r[adj] + 0.05))
+Conductance.r <- geoCorrection(speed.r, type = 'r', scl = T)
+rm(slope.r, speed.r, hd, adj)
+```
+
+
+```{r}
+pas <- passage(Conductance.r, sites, sites, theta = 1)
+plot(pas)
+```
+
+```{r}
+plot(c(cost_matrix), c(commute_matrix))
+```
 
 
 
