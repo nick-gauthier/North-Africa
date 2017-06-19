@@ -1,0 +1,175 @@
+---
+title: "Input data comparison"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+We have multiple options for the climate and soil data to use for the potential cultivable land analysis. Let's compare them.
+
+```{r}
+library(raster)
+library(rasterVis)
+library(tidyverse)
+library(pbapply)
+```
+
+```{r}
+bbox <- extent(-10, 20, 28, 38)
+
+```
+
+
+# Climate
+First import the modis/chirps data at 3' resolution
+```{r}
+get_clim <- function(x){
+  list.files(x, full.names = T) %>%
+    stack %>%
+    crop(bbox)
+}
+
+prec.mod <- get_clim('~/gdrive/Data/MOD11C3v6.0-CHIRPSv2.0_MONTHLY_03m/prec/')
+temp.mod <- get_clim('~/gdrive/Data/MOD11C3v6.0-CHIRPSv2.0_MONTHLY_03m/temp/')
+
+prec.mod[prec.mod[] == -9999] <- NA
+temp.mod[temp.mod[] == -9999] <- NA
+```
+
+Next import the CHELSA data and resample to 3' resolutioin.
+```{r}
+# the list.files import metho for chelsa mixes up the month orders ... fix manually
+prec.chelsa <- get_clim('~/Downloads/CHELSA/prec/') %>%
+  aggregate(fact = 6) %>%
+  .[[c(1,5:12, 2:4)]]
+temp.chelsa <- get_clim('~/Downloads/CHELSA/temp/') %>% 
+  `/`(10) %>%
+  aggregate(fact = 6) %>%
+  .[[c(1,5:12, 2:4)]]
+```
+
+
+Compare the temp maps
+```{r}
+levelplot(brick(c(temp.mod, temp.chelsa))[[c(1,13,4,16,7,19,10,22)]])
+levelplot(temp.mod - temp.chelsa, par.settings = BuRdTheme(), at = seq(-15,15,1))
+```
+consistent warm bias in modis lst during hotter months (makes sense if we're talking skin temp vs air temp).
+consistent cold bias along coasts in winter
+
+Compare the prec maps.
+```{r}
+levelplot(brick(c(prec.mod, prec.chelsa))[[c(1,13,4,16,7,19,10,22)]])
+levelplot(prec.mod - prec.chelsa, par.settings = PuOrTheme(), at = seq(-260, 260, 10))
+```
+
+In the end, it looks like the modis/chirps dataset has too many artifacts, even though its nicer.
+
+## Growing degree days
+```{r cache = T}
+gdd <- function(temp.map){
+  
+  temp.daily <- temp.mod[[rep(1, 365)]]
+  
+  temp.map %>%
+    getValues %>%
+    pbapply(1, function(x){
+    if(any(is.na(x))){return(rep(NA, 365))} else{
+      dat <- data.frame(doy =  c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349),
+                        temp = x)
+      mod <- gam(temp ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366)), data = dat)
+      return(predict.gam(mod, data.frame(doy = 1:365)))
+    }
+}) %>% 
+    t %>%
+  setValues(temp.daily, .) %>% 
+    reclassify(c(-Inf, 5, 0)) %>%
+    sum
+}
+
+gdd.mod <- gdd(temp.mod)
+gdd.chelsa <- gdd(temp.chelsa)
+levelplot(brick(c(gdd.mod, gdd.chelsa)))
+gdd.index <- 1 / (1 + exp(0.0052 * (1334 - gdd.chelsa)))
+```
+
+```{r}
+library(SPEI)
+lats <- temp.mod[[1]] %>% coordinates %>% .[,2] %>% setValues(temp.mod[[1]], .)
+
+pet.mod <- thornthwaite((temp.mod %>% getValues %>% t), lat = getValues(lats), na.rm = T) %>%
+  t %>%
+  setValues(temp.mod, .)
+pet.chelsa <- thornthwaite((temp.chelsa %>% getValues %>% t), lat = getValues(lats), na.rm = T) %>%
+  t %>%
+  setValues(temp.chelsa, .)
+
+
+levelplot(brick(c(pet.mod, pet.chelsa))[[c(1,13,4,16,7,19,10,22)]])
+levelplot(pet.mod - pet.chelsa, par.settings = PuOrTheme())
+```
+calculate alpha
+```{r}
+alpha <- raster('~/Downloads/CGIAR PET/ALPHA/alpha/') %>% 
+  crop(bbox) %>%
+  aggregate(fact = 6) %>%
+  `/`(100)
+levelplot(alpha)
+alpha.index <- 1 / (1 + exp(14.705 * (0.3295 - alpha)))
+levelplot(alpha.index)
+```
+
+# Soil Data
+the polygon for the hwsd data make too large artifacts for this scale
+```{r}
+ph.hwsd <- raster('~/Downloads/Harmonised Soil Database/HWSD_1247/data/T_PH_H2O.nc4') %>%
+  crop(bbox)
+c.hwsd <- raster('~/Downloads/Harmonised Soil Database/HWSD_1247/data/AWT_T_SOC.nc4') %>%
+  crop(bbox)
+ph.sg <- raster('~/Downloads/SoilGrids250/PHIHOX_M_sl4_250m_ll.tif') %>%
+  crop(bbox) %>%
+  aggregate(fact = 24) %>%
+  `*`(.1)
+c.sg <- raster('~/Downloads/SoilGrids250/OCSTHA_M_30cm_250m_ll.tif') %>%
+  crop(bbox) %>%
+  `*`(.1) %>%
+  aggregate(fact = 24)
+levelplot(brick(c(c.sg, c.hwsd)))
+levelplot(brick(c(ph.sg, ph.hwsd)))
+
+```
+
+check indices from ramankutty
+```{r}
+a <- 3.9157; b <- 1.3766; c <- 3.468; d <- -.0791; e <- -27.33
+c.index <- (a / (1 + exp(b * (c - c.sg)))) * (a / (1 + exp(d * (e - c.sg))))
+levelplot(c.index)
+
+ph.index <- ph.sg
+ph.index[ph.sg < 6.5] <- -2.085 + .475 * ph.sg[ph.sg < 6.5]
+ph.index[ph.sg >= 6.5 & ph.sg < 8] <- 1
+ph.index[ph.sg >=8] <- 1 - 2 * ph.sg[ph.sg >=8]
+
+levelplot(ph.sg)
+levelplot(ph.index)
+```
+
+```{r}
+soil.index <- (ph.index * c.index) %>% reclassify(c(-Inf, 0, 0))
+levelplot(soil.index)
+```
+```{r}
+climate.index <- (gdd.index * alpha.index)
+levelplot(climate.index)
+```
+
+```{r}
+levelplot(climate.index * soil.index)
+```
+```{r}
+gplot(climate.index * soil.index) +
+  geom_raster(aes(fill = value)) +
+  geom_point(data = villas, aes(lon, lat)) +
+  coord_quickmap()
+```
+
