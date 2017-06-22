@@ -29,6 +29,39 @@ plot(srtm)
 
 
 ```{r}
+cities <- read.csv('NA_cities.csv')
+
+plot(cities$lon, cities$lat)
+```
+```{r}
+cities %>%
+  ggplot(aes(lon, lat)) +
+  geom_point(aes(color = Size, size = Size)) +
+  theme_void() +
+  coord_fixed()
+
+cities %>%
+  mutate(Size = 1.7 * Size^.635) %>%
+  ggplot(aes(lon, lat)) +
+  geom_point(aes(color = Size, size = Size)) +
+  theme_void() +
+  coord_fixed()
+
+ggplot(cities, aes(BA_rank, Size)) +
+  geom_boxplot()
+```
+
+```{r}
+cities %>%
+  mutate(population = 1.7 * Size^.635)
+
+ggplot(cities, aes(from, Size)) +
+  geom_point()
+```
+
+
+  
+```{r}
 places <- pl_search_places() %>%
   filter(locationPrecision == 'precise') %>%
   select(title, type = featureTypes, description, 
