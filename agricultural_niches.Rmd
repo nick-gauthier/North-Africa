@@ -8,7 +8,6 @@ library(raster)
 library(rasterVis)
 library(tidyverse)
 library(mgcv)
-library(pbapply)
 ```
 
 
@@ -27,25 +26,43 @@ temp <- brick('Data/CHELSA/temp.nc')
 ```{r}
 gdd_interp <- function(x){
     if(any(is.na(x))){return(NA)} else{
-      dat <- data.frame(doy =  c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349),
-                        temp = temp[7090400])
-      daily <- gam(temp ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366)), data = dat) %>%
+    daily <- gam(x ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366))) %>%
         predict.gam(data.frame(doy = 1:365)) 
-      daily[daily < 5] <- 5
-      daily[daily > 30] <- 30
-      return(sum(daily - 5))
+    daily[daily < 5] <- 5
+    daily[daily > 30] <- 30
+    return(sum(daily - 5))
     }
 }
 
+doy <-c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349)
 
-gdd <- temp %>%
-  getValues %>%
-  pbapply(1, gdd_interp) 
+beginCluster(4)
+test <- clusterR(temp, calc, args = list(fun = gdd_interp), export = 'doy')
+endCluster()
 
-#%>% 
-  c %>%
-  setValues(wheat.area, .)
-unique(gdd)
-plot(gdd)
+writeRaster(gdd, 'gdd_global.tif')
+```
+
+```{r}
+plot(gdd, wheat.area, maxpixels = 1000000)
+```
+
+
+```{r}
+alpha <- raster('~/Downloads/CGIAR PET/ALPHA/alpha/w001001.adf') %>% resample(gdd)
+plot(alpha)
+plot(alpha, wheat.area, maxpixels = 1000000)
+
+```
+
+```{r}
+ph.sg <- raster('~/Downloads/SoilGrids250/PHIHOX_M_sl4_250m_ll.tif') %>%
+  resample(gdd) %>%
+  `*`(.1)
+c.sg <- raster('~/Downloads/SoilGrids250/OCSTHA_M_30cm_250m_ll.tif') %>%
+  resample(gdd) %>%
+  `*`(.1) %>%
+plot(ph.sg)
+
 ```
 
