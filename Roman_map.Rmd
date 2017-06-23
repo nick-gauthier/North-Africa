@@ -10,7 +10,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 ```{r}
 library(raster)
+library(rgdal)
 library(rasterVis)
+library(viridis)
 library(tidyverse)
 library(stringr)
 library(pleiades)
@@ -29,34 +31,39 @@ plot(srtm)
 
 
 ```{r}
-cities <- read.csv('NA_cities.csv')
+cities <- read.csv('NA_cities.csv') %>%
+  group_by(BA_rank) %>% 
+  mutate(size_est = ifelse(is.na(Size), mean(Size, na.rm=TRUE), Size)) %>%
+  mutate(population = 1.7 * Size^.635, pop_est = 1.7 * size_est^.635)
 
-plot(cities$lon, cities$lat)
-```
-```{r}
-cities %>%
-  ggplot(aes(lon, lat)) +
-  geom_point(aes(color = Size, size = Size)) +
-  theme_void() +
-  coord_fixed()
+roads <- readOGR('Data/Shapefiles/ba_roads.shp') %>%
+  spTransform(CRS('+proj=longlat')) %>%
+  crop(bbox) %>%
+  fortify
 
-cities %>%
-  mutate(Size = 1.7 * Size^.635) %>%
-  ggplot(aes(lon, lat)) +
-  geom_point(aes(color = Size, size = Size)) +
-  theme_void() +
-  coord_fixed()
-
-ggplot(cities, aes(BA_rank, Size)) +
-  geom_boxplot()
+aqueducts <- readOGR('Data/Shapefiles/aqueducts.shp') %>%
+  spTransform(CRS('+proj=longlat')) %>%
+  crop(bbox)
 ```
 
 ```{r}
-cities %>%
-  mutate(population = 1.7 * Size^.635)
+ggplot(cities, aes(lon, lat)) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5) +
+  geom_point(aes(color = pop_est, size = pop_est), alpha = .8) +
+  scale_size_area() +
+  scale_color_viridis() +
+  theme_void() +
+  coord_fixed()
+```
 
-ggplot(cities, aes(from, Size)) +
-  geom_point()
+```{r}
+with(cities, cities[rep(1:nrow(cities), pop_est),]) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
 ```
 
 
@@ -72,34 +79,65 @@ places <- pl_search_places() %>%
   filter(str_detect(periods, 'R')) %>%
   print
 
+places %>% filter(str_detect(type, 'villa')) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
 
-villas <- filter(places, str_detect(type, 'villa'))
-mines <- filter(places, str_detect(type, 'mine'))
-settlements <- filter(places, str_detect(type,'settlement'))
-springs <- filter(places, str_detect(type, 'spring'))
-estates <- filter(places, str_detect(type, 'estate'))
-oases <- filter(places, str_detect(type, 'oasis'))
+places %>% filter(str_detect(type, 'settlement')) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
+
+places %>% filter(str_detect(type, 'mine')) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
+
+places %>% filter(str_detect(type, 'spring')) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
+
+places %>% filter(str_detect(type, 'oasis')) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
+
+
+places %>% filter(str_detect(type, 'settlement')) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void() +
+  geom_point(data = cities, aes(lon, lat, size = pop_est), color = 'white') +
+  scale_size_area()
+
 
 major <- settlements %>% filter(str_detect(tags, 'major=1'))
-
-gplot(srtm) +
-  geom_raster(aes(fill = value)) +
-  geom_point(data = major, aes(x = lon, y = lat)) +
-  coord_fixed()
-
 ```
 
 
-```{r}
-roads <- readOGR('Roman Road Network (version 2008)/roads/') %>%
-  spTransform(CRS('+proj=longlat')) %>%
-  crop(extent(-10, 20, 30, 38))
-
-plot(roads)
-```
 
 
-```{r t(ransition}
+```{r transition}
 library(gdistance)
 
 altDiff <- function(x){x[2] - x[1]}
