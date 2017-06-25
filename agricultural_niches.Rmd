@@ -56,13 +56,42 @@ plot(alpha, wheat.area, maxpixels = 1000000)
 ```
 
 ```{r}
+
+beginCluster(2)
 ph.sg <- raster('~/Downloads/SoilGrids250/PHIHOX_M_sl4_250m_ll.tif') %>%
   resample(gdd) %>%
   `*`(.1)
 c.sg <- raster('~/Downloads/SoilGrids250/OCSTHA_M_30cm_250m_ll.tif') %>%
   resample(gdd) %>%
-  `*`(.1) %>%
-plot(ph.sg)
+  `*`(.1)
+endCluster()
 
+
+plot(ph.sg)
+plot(c.sg)
+
+plot(ph.sg, wheat.area,  maxpixels = 1000000)
+plot(c.sg, wheat.area,  maxpixels = 1000000)
+```
+
+```{r}
+dat <- brick(c(wheat.area, alpha, gdd, ph.sg, c.sg)) %>% 
+  as.data.frame(na.rm = T, xy = T) %>%
+  rename(wheat_area = wheat_HarvestedAreaFraction, alpha = w001001, gdd = layer, ph = PHIHOX_M_sl4_250m_ll, c = OCSTHA_M_30cm_250m_ll)
+
+dat %>%
+  mutate(alpha_int = as.integer(alpha)) %>%
+ggplot(aes(alpha_int, wheat_area, group = alpha_int)) +
+  geom_boxplot(notch=FALSE, outlier.shape=NA, fill="red", alpha=0.2)
+
+dat %>%
+  mutate(alpha_int = as.integer(alpha)) %>%
+  group_by(alpha_int) %>%
+  summarise(avg = mean(wheat_area)) %>%
+ggplot(aes(alpha_int, avg)) +
+  geom_point()
+
+
+test <- gam(wheat_area ~ s(gdd, bs = ) + s(alpha) + s(ph) + s(c) + s(x,y, bs = 'sos'), family = betar(link = 'logit'), data = dat)
 ```
 
