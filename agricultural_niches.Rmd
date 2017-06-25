@@ -50,6 +50,46 @@ plot(gdd, wheat.area, maxpixels = 1000000)
 
 ```{r}
 alpha <- raster('~/Downloads/CGIAR PET/ALPHA/alpha/w001001.adf') %>% resample(gdd)
+
+bbox <- extent(-10, 20, 28, 38)
+
+prec <- brick('Data/CHELSA/prec.nc') %>% crop(bbox)
+tmax <- brick('Data/CHELSA/tmax.nc') %>% crop(bbox)
+tmin <- brick('Data/CHELSA/tmin.nc') %>% crop(bbox)
+
+srad <- list.files('~/Downloads/CGIAR PET/ET_SolRad', full.names = T) %>%
+  stack %>%
+  crop(bbox) %>%
+  resample(prec) %>%
+  .[[c(1,5:12, 2:4)]] %>%
+  `*`(2.45) #convert to mj/m2/day
+
+library(SPEI)
+
+pet <- hargreaves(tmin %>% getValues %>% t, 
+                  tmax %>% getValues %>% t, 
+                  Ra = srad %>% getValues %>% t, 
+                  Pre = prec %>% getValues %>% t, na.rm = T) %>%
+  t %>%
+  setValues(tmin, .)
+
+levelplot(pet)
+levelplot(sum(prec)/sum(pet))
+
+
+swc <- setValues(pet[[1]], 100) %>% mask(pet[[1]])
+for(i in 1:12){
+  ksoil <- swc / 350
+  aet <- pet[[i]] * ksoil
+  swc.tmp <- swc + prec[[i]] * (1 - .15) - aet
+  swc <- reclassify(swc.tmp, c(-Inf, 0, 0, 350, Inf, 350))
+}
+
+levelplot(swc)
+
+
+
+
 plot(alpha)
 plot(alpha, wheat.area, maxpixels = 1000000)
 
