@@ -12,18 +12,50 @@ library(mgcv)
 
 ```{r}
 library(ncdf4)
-pft <- nc_open('mksrf_pft.081008.nc')
+pft <- nc_open('~/Downloads/mksrf_pft_potv.nc') #%>% ncvar_get(varid = 'PCT_PFT')
+pft
+test <- pft %>% brick(xmn = -180, xmx = 180, ymn = -90, ymx = 90, transpose = F)
+rasterVis::levelplot(test[[1]])
+lat <- ncvar_get(pft, varid = 'LAT')
+lon <- ncvar_get(pft, varid = 'LON')
+nc_close(pft)
+vals <- brick('~/Downloads/mksrf_pft_potv.nc') %>% getValues
+landmask <- raster('~/Downloads/mksrf_pft_potv.nc', varname = 'LANDMASK') 
+plot(landmask)
+landmask <- landmask %>% getValues %>% setValues(temp[[1]], .)
+landmask[landmask == 0] <- NA
+crs(landmask) <- "+proj=longlat +datum=WGS84"
+#Generate coordinates for each grid cell
+ x<- rep(lon, length(lat))
+ y<- rep(lat, each = length(lon))
+ sp<- SpatialPoints(cbind(x,y))
+temp<- SpatialPixels(points = sp) %>% raster %>% brick(rep(., 12))
+test <- setValues(temp, vals) %>% mask(landmask)
+crs(test) <- "+proj=longlat +datum=WGS84" 
 
-pft$var
-%>% ncvar_get
+rasterVis::levelplot(test)
+
 pft
 plot(pft[[1]])
 ```
 
 ```{r}
-wc <- raster::getData('worldclim', var = 'bio', res = 5)
+wc <- raster::getData('worldclim', var = 'bio', res = 5) %>% 
+  aggregate(fact = 6) %>%
+  crop(bbox) %>%
+  mask(landmask %>% crop(bbox))
 
-plot(wc[[1]])
+pft <- test %>% crop(bbox)
+```
+
+
+```{r}
+biomes <- readxl::read_excel('BIOME4-2.xls', sheet = 2) %>% 
+  dplyr::select(Lon, Lat, biome = MegaBiome00k)
+plot(biomes$Lon,biomes$Lat)
+```
+```{r}
+raster::extract()
 ```
 
 ```{r}
