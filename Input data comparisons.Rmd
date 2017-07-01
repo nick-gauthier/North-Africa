@@ -53,6 +53,7 @@ Compare the temp maps
 ```{r}
 levelplot(brick(c(temp.mod, temp.chelsa))[[c(1,13,4,16,7,19,10,22)]])
 levelplot(temp.mod - temp.chelsa, par.settings = BuRdTheme(), at = seq(-15,15,1))
+levelplot(temp.chelsa)
 ```
 consistent warm bias in modis lst during hotter months (makes sense if we're talking skin temp vs air temp).
 consistent cold bias along coasts in winter
@@ -69,7 +70,7 @@ In the end, it looks like the modis/chirps dataset has too many artifacts, even 
 ```{r cache = T}
 gdd <- function(temp.map){
   
-  temp.daily <- temp.mod[[rep(1, 365)]]
+  temp.daily <- temp.map[[rep(1, 365)]]
   
   temp.map %>%
     getValues %>%

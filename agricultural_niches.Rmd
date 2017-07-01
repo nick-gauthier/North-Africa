@@ -78,20 +78,27 @@ levelplot(sum(prec)/sum(pet))
 
 
 swc <- setValues(pet[[1]], 100) %>% mask(pet[[1]])
+aet1 <- setValues(pet[[1]], 0) %>% mask(pet[[1]])
 for(i in 1:12){
   ksoil <- swc / 350
   aet <- pet[[i]] * ksoil
+  aet1 <- aet1 + aet
   swc.tmp <- swc + prec[[i]] * (1 - .15) - aet
   swc <- reclassify(swc.tmp, c(-Inf, 0, 0, 350, Inf, 350))
 }
+alpha2 <- aet1/sum(pet)
 
+
+
+levelplot(alpha)
+
+wheat <- crop(wheat.area, bbox)
+plot(alpha, wheat)
 levelplot(swc)
-
-
-
+levelplot(wheat)
 
 plot(alpha)
-plot(alpha, wheat.area, maxpixels = 1000000)
+plot(alpha, wheat, maxpixels = 1000000)
 
 ```
 

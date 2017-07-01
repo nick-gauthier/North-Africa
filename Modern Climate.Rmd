@@ -205,7 +205,7 @@ carbon <- raster('~/Downloads/ORCDRC_M_sl4_250m_ll.tif')
 avhrr_colors <- c('#444f89', '#016400', '#018200', '#97bf47', '#02dc00', '#00ff00', '#92ae2f',
                   '#dcce00', '#ffad00', '#fffbc3', '#8c4809', '#f7a5ff', '#ffc7ae', '#efefe8', '#00ffff')
 
-avhrr <- raster('AVHRR_1km_LANDCOVER_1981_1994.GLOBAL.tif') %>%
+avhrr <- raster('Data/AVHRR_1km_LANDCOVER_1981_1994.GLOBAL.tif') %>%
   crop(bbox) %>%
   as.data.frame(xy = T) %>%
   mutate(class = recode_factor(AVHRR_1km_LANDCOVER_1981_1994.GLOBAL,
