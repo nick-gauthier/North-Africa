@@ -35,3 +35,33 @@ tmin <- resamp_chelsa('~/Downloads/CHELSA/tmin/') %>%
 rasterVis::levelplot(tmin)
 writeRaster(tmin, 'tmin.nc')
 rm(tmin)
+
+
+
+#### bioclim
+library(dismo)
+tmin <- brick('Data/CHELSA/tmin.nc')
+tmax <- brick('Data/CHELSA/tmax.nc')
+prec <- brick('Data/CHELSA/prec.nc')
+
+
+bioclim <- biovars(prec, tmin, tmax)
+writeRaster(bioclim, 'Data/CHELSA/bioclim.nc')
+
+#pet
+srad <- list.files('~/Downloads/CGIAR PET/ET_SolRad', full.names = T) %>%
+  stack %>%
+  raster::resample(prec) %>%
+  .[[c(1,5:12, 2:4)]] %>%
+  `*`(2.45) #convert to mj/m2/day
+
+library(SPEI)
+
+pet <- hargreaves(tmin %>% getValues %>% t, 
+                  tmax %>% getValues %>% t, 
+                  Ra = srad %>% getValues %>% t, 
+                  Pre = prec %>% getValues %>% t, na.rm = T) %>%
+  t %>%
+  setValues(tmin, .)
+writeRaster(pet, 'Data/CHELSA/pet.nc')
+rm(bioclim, tmin, tmax, pet, prec, srad)

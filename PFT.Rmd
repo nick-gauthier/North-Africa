@@ -7,9 +7,168 @@ output: html_notebook
 library(tidyverse)
 library(raster)
 library(mgcv)
+library(RStoolbox)
 ```
 
 
+
+
+
+# BIOME6000
+
+Multinomial logistic regression using BIOME 6000 data.
+
+First import and processthe BIOME 6000 data.
+```{r}
+biomes <- readxl::read_excel('BIOME4-2.xls', sheet = 3) %>% 
+  dplyr::select(Lon, Lat, biome = Biome00k, megabiome = MegaBiome00k) %>%
+  filter(!is.na(biome)) %>%
+  mutate(biome = as.factor(biome), megabiome = as.factor(megabiome), megabiome.int = as.numeric(megabiome) - 1)
+
+ggplot(biomes, aes(Lon, Lat)) +
+  borders("world", colour="gray50", fill="gray50") +
+  geom_point(aes(color = megabiome)) +
+  coord_fixed() +
+  theme_void()
+
+ggplot(biomes, aes(x = biome, fill = biome)) +
+  geom_bar()
+```
+
+```{r}
+bioclim <- brick('Data/CHELSA/bioclim.nc')
+clim.pca <- rasterPCA(bioclim, spca = T)
+clim.pca
+summary(clim.pca$model)
+
+plot(clim.pca$model)
+plot(clim.pca$map[[1:8]])
+```
+
+Now add soil and gdd/alpha parameters.
+```{r}
+gdd <- raster('gdd_global.tif')
+alpha <- raster('~/Downloads/CGIAR PET/ALPHA/alpha/w001001.adf') %>% resample(gdd)
+names(alpha) <- 'alpha'
+pet <- brick('Data/CHELSA/pet.nc') %>% sum
+
+beginCluster(2)
+ph.sg <- raster('~/Downloads/SoilGrids250/PHIHOX_M_sl4_250m_ll.tif') %>%
+  resample(gdd)
+c.sg <- raster('~/Downloads/SoilGrids250/OCSTHA_M_30cm_250m_ll.tif') %>%
+  resample(gdd)
+endCluster()
+```
+
+```{r}
+preds <- brick(c(clim.pca$map[[1:4]], gdd, alpha, pet, ph.sg, c.sg))
+names(preds) <- c('PC1', 'PC2', 'PC3', 'PC4', 'gdd', 'alpha', 'pet', 'ph', 'carbon')
+
+dat <- cbind(biomes, raster::extract(preds, biomes[,1:2], na.rm = T))
+```
+
+Lets fit a series of one-to-many logistic regresstions with select=TRUE to select candidate models for each megabiome.
+```{r}
+library(parallel)
+cl <- makeCluster(2)
+
+
+```
+
+
+Confirming that the 4 pcas are the best, if we add 4 more pcas, they are penalized to 0.
+```{r}
+boreal.mod.pca <- mutate(dat, binary = if_else(megabiome.int == 0, 1, 0)) %>%
+  gam(binary ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'), data = ., method = 'REML', select = T, family = binomial, cluster = cl)
+plot(boreal.mod.pca)
+
+summary(boreal.mod.pca)
+gam.check(boreal.mod.pca)
+boreal.mod.pca$aic
+boreal.mod$aic
+
+
+boreal.mod.pca2 <- mutate(dat, binary = if_else(megabiome.int == 0, 1, 0)) %>%
+  gam(binary ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(PC5, bs = 'cr') + s(PC6, bs = 'cr') + s(PC7, bs = 'cr') + s(PC8, bs = 'cr'), data = ., method = 'REML', select = T, family = binomial, cluster = cl)
+
+plot(boreal.mod.pca2)
+summary(boreal.mod.pca2)
+boreal.mod.pca2$aic
+```
+
+```{r}
+boreal.mod <- mutate(dat, binary = if_else(megabiome.int == 0, 1, 0)) %>%
+  gam(binary ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr')
+      + s(gdd, bs = 'cr') + s(alpha, bs = 'cr') + s(pet, bs = 'cr') + s(ph, bs = 'cr') + s(carbon, bs = 'cr'), data = ., method = 'REML', select = T, family = binomial, cluster = cl)
+plot(boreal.mod)
+```
+
+
+```{r}
+mod1 <- gam(list(megabiome.int 
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr')), family = multinom(K = 8), method = 'REML', select = T, data = dat)
+
+
+gam.check(mod2)
+summary(mod2)
+mod2$aic
+plot(mod2, scale = 0)
+```
+
+```{r}
+mod3 <- gam(list(biome.int ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
+                 ~ s(PC1, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100)), family = multinom(K = 8), method = 'REML', control = list(nthreads = 4), optimizer = 'perf', data = dat2)
+
+mod3$aic
+plot(mod3, scale = 0)
+summary(mod3)
+```
+```{r}
+mod4 <- gam(list(biome.int ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr'),
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr')), family = multinom(K = 8), method = 'REML', control = list(nthreads = 4), optimizer = 'perf', data = dat2)
+gam.check(mod3)
+summary(mod3)
+```
+
+```{r}
+mod2 <- gam(list(biome.int 
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
+                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr')), 
+            family = multinom(K = 8), data = dat, select = T)
+```
+
+```{r}
+srtm <- raster('~/gdrive/Data/SRTM_1km.tif')
+
+elev <- srtm %>% aggregate(pft)
+```
+
+# PFT
 ```{r}
 library(ncdf4)
 pft <- nc_open('~/Downloads/mksrf_pft_potv.nc') #%>% ncvar_get(varid = 'PCT_PFT')
@@ -38,43 +197,3 @@ rasterVis::levelplot(test)
 pft
 plot(pft[[1]])
 ```
-
-```{r}
-wc <- raster::getData('worldclim', var = 'bio', res = 5) %>% 
-  aggregate(fact = 6) %>%
-  crop(bbox) %>%
-  mask(landmask %>% crop(bbox))
-
-pft <- test %>% crop(bbox)
-```
-
-
-```{r}
-biomes <- readxl::read_excel('BIOME4-2.xls', sheet = 2) %>% 
-  dplyr::select(Lon, Lat, biome = MegaBiome00k) %>%
-  filter(!is.na(biome)) %>%
-  mutate(biome.int = biome %>% as.factor %>% as.numeric %>% `-`(1))
-plot(biomes$Lon,biomes$Lat)
-```
-```{r}
-unique(biomes$biome.int)
-dat <- raster::extract(wc, biomes[,1:2], na.rm = T, df = T) %>% cbind(biomes, .)
-
-
-mod1 <- gam(list(biome.int ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
-                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
-                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
-                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
-                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
-                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
-                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr'),
-                 ~ s(bio1, bs = 'cr') + s(bio2, bs = 'cr') + s(bio3, bs = 'cr') + s(bio4, bs = 'cr') + s(bio5, bs = 'cr') + s(bio6, bs = 'cr') + s(bio7, bs = 'cr') + s(bio8, bs = 'cr') + s(bio9, bs = 'cr') + s(bio10, bs = 'cr') + s(bio11, bs = 'cr') + s(bio12, bs = 'cr') + s(bio13, bs = 'cr') + s(bio14, bs = 'cr') + s(bio15, bs = 'cr') + s(bio16, bs = 'cr') + s(bio17, bs = 'cr') + s(bio18, bs = 'cr') + s(bio19, bs = 'cr')), 
-            family = multinom(K = 8), data = dat, select = T)
-```
-
-```{r}
-srtm <- raster('~/gdrive/Data/SRTM_1km.tif')
-
-elev <- srtm %>% aggregate(pft)
-```
-
