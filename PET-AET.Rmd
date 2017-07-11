@@ -1,0 +1,66 @@
+---
+title: "PET-AET"
+output: html_document
+---
+
+
+```{r}
+library(raster)
+library(tidyverse)
+library(SPEI)
+```
+
+```{r}
+tmin <- brick('Data/CHELSA/tmin.nc')
+tmax <- brick('Data/CHELSA/tmax.nc')
+prec <- brick('Data/CHELSA/prec.nc')
+#pet <- brick('Data/CHELSA/pet.nc')
+```
+
+```{r}
+srad <- list.files('~/Downloads/CGIAR PET/ET_SolRad', full.names = T) %>%
+  stack %>%
+  raster::resample(prec) %>%
+  .[[c(1,5:12, 2:4)]] %>%
+  `*`(2.45) #convert to mj/m2/day
+```
+
+
+```{r}
+pet <- hargreaves(tmin %>% getValues %>% t, 
+                  tmax %>% getValues %>% t, 
+                  Ra = srad %>% getValues %>% t, 
+                  Pre = prec %>% getValues %>% t, na.rm = T) %>%
+  t %>%
+  setValues(tmin, .)
+
+writeRaster(pet, 'Data/CHELSA/pet.nc', overwrite = T)
+rm(srad, tmax, tmin)
+```
+
+```{r}
+swc <- setValues(pet[[1]], 100) %>% mask(pet[[1]])
+aet.brick <- setValues(pet, 0) %>% mask(pet[[1]])
+
+for(a in 1:10){
+  for(i in 1:12){
+    ksoil <- swc / 350
+    aet <- pet[[i]] * ksoil
+    aet.brick[[i]] <- aet
+    swc.tmp <- swc + prec[[i]] * (1 - .15) - aet
+    swc <- reclassify(swc.tmp, c(-Inf, 0, 0, 350, Inf, 350))
+  }
+}
+```
+
+
+
+```{r}
+plot(aet.brick)
+```
+
+```{r}
+alpha <- sum(aet.brick) / sum(pet)
+writeRaster(alpha, 'Data/CHELSA/alpha.nc', overwrite = T)
+```
+

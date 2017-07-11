@@ -37,7 +37,7 @@ gdd_interp <- function(x){
 doy <-c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349)
 
 beginCluster(4)
-test <- clusterR(temp, calc, args = list(fun = gdd_interp), export = 'doy')
+gdd <- clusterR(temp, calc, args = list(fun = gdd_interp), export = 'doy')
 endCluster()
 
 writeRaster(gdd, 'gdd_global.tif')
