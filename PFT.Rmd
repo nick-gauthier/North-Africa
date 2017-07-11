@@ -11,10 +11,13 @@ library(RStoolbox)
 ```
 
 # Prentice et al method
+
+
 ```{r}
 temp <- brick('Data/CHELSA/temp.nc')
 t_warm <- max(temp)
 t_cold <- min(temp)
+rm(temp)
 alpha <- raster('Data/CHELSA/alpha.nc')
 gdd0 <- raster('gdd0_global.tif')
 gdd5 <- raster('gdd5_global.tif')
@@ -38,8 +41,11 @@ hot.desert.shrub <- (t_warm > 22)
 cold.desert.shrub <- (gdd0 > 100)
 ```
 
+```{r}
+potveg <- brick(c(tropical.evergreen, tropical.raingreen, warm.temperate.evergreen, temperate.summergreen, cool.temperate.conifer, boreal.evergreen.conifer, boreal.summergreen, succulent, warm.grass.shrub, cool.grass.shrub, cold.grass.shrub, hot.desert.shrub, cold.desert.shrub))
 
-
+rasterVis::levelplot(potveg)
+```
 
 
 # BIOME6000
@@ -157,6 +163,27 @@ predictions <- predict(preds, mod1, type = 'response', index = 1:9)
 names(predictions) <- biomes$megabiome %>% levels
 rasterVis::levelplot(predictions)
 ```
+
+
+Now use prentice variables.
+```{r}
+preds2 <- brick(c(alpha, gdd5, t_cold, t_warm))
+names(preds2) <- c('alpha', 'gdd5', 't_cold', 't_warm')
+dat2 <- cbind(biomes, raster::extract(preds2, biomes[,1:2], na.rm = T))
+
+mod2 <- gam(list(megabiome.int 
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
+                 ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr')), family = multinom(K = 8), method = 'REML', select = F, data = dat2, optimizer = 'perf')
+
+```
+
+
 
 ```{r}
 mod3 <- gam(list(biome.int ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(Lon, Lat, bs = 'sos', k = 100),
