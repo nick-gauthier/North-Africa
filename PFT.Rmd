@@ -10,6 +10,34 @@ library(mgcv)
 library(RStoolbox)
 ```
 
+# Prentice et al method
+```{r}
+temp <- brick('Data/CHELSA/temp.nc')
+t_warm <- max(temp)
+t_cold <- min(temp)
+alpha <- raster('Data/CHELSA/alpha.nc')
+gdd0 <- raster('gdd0_global.tif')
+gdd5 <- raster('gdd5_global.tif')
+```
+
+
+```{r}
+tropical.evergreen <- (t_cold > 15.5 & alpha > .8)
+tropical.raingreen <- (t_cold > 15.5 & alpha > .45 & alpha < .95)
+warm.temperate.evergreen <- (t_cold > 5 & alpha > .65)
+temperate.summergreen <- (t_cold > -15 & t_cold < 15.5 & gdd5 > 1200 & alpha > .65)
+cool.temperate.conifer <- (t_cold > -19 & t_cold < 5 & gdd5 > 900 & alpha > .65)
+boreal.evergreen.conifer <- (t_cold > -35 & t_cold < -2 & gdd5 > 350 & alpha > .75)
+boreal.summergreen <- (t_cold < 5 & gdd5 > 350 & alpha > .65)
+
+succulent <- (t_cold > 5 & alpha > .28)
+warm.grass.shrub <- (t_warm > 22 & alpha > .18)
+cool.grass.shrub <- (gdd5 > 500 & alpha > .33)
+cold.grass.shrub <- (gdd0 > 100 & alpha > .33)
+hot.desert.shrub <- (t_warm > 22)
+cold.desert.shrub <- (gdd0 > 100)
+```
+
 
 
 
@@ -23,6 +51,7 @@ First import and processthe BIOME 6000 data.
 biomes <- readxl::read_excel('BIOME4-2.xls', sheet = 3) %>% 
   dplyr::select(Lon, Lat, biome = Biome00k, megabiome = MegaBiome00k) %>%
   filter(!is.na(biome)) %>%
+  mutate(megabiome = if_else(megabiome == 'dry tundra', 'tundra', megabiome)) %>%
   mutate(biome = as.factor(biome), megabiome = as.factor(megabiome), megabiome.int = as.numeric(megabiome) - 1)
 
 ggplot(biomes, aes(Lon, Lat)) +
@@ -31,7 +60,7 @@ ggplot(biomes, aes(Lon, Lat)) +
   coord_fixed() +
   theme_void()
 
-ggplot(biomes, aes(x = biome, fill = biome)) +
+ggplot(biomes, aes(x = megabiome, fill = megabiome)) +
   geom_bar()
 ```
 
@@ -47,16 +76,17 @@ plot(clim.pca$map[[1:8]])
 
 Now add soil and gdd/alpha parameters.
 ```{r}
+beginCluster(2)
+
 gdd <- raster('gdd_global.tif')
 alpha <- raster('~/Downloads/CGIAR PET/ALPHA/alpha/w001001.adf') %>% resample(gdd)
 names(alpha) <- 'alpha'
 pet <- brick('Data/CHELSA/pet.nc') %>% sum
-
-beginCluster(2)
 ph.sg <- raster('~/Downloads/SoilGrids250/PHIHOX_M_sl4_250m_ll.tif') %>%
   resample(gdd)
 c.sg <- raster('~/Downloads/SoilGrids250/OCSTHA_M_30cm_250m_ll.tif') %>%
   resample(gdd)
+
 endCluster()
 ```
 
@@ -113,13 +143,19 @@ mod1 <- gam(list(megabiome.int
                  ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
                  ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
                  ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
-                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr')), family = multinom(K = 8), method = 'REML', select = T, data = dat)
+                 ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr')), family = multinom(K = 8), method = 'REML', select = T, data = dat, optimizer = 'perf')
 
 
-gam.check(mod2)
-summary(mod2)
-mod2$aic
-plot(mod2, scale = 0)
+gam.check(mod1)
+summary(mod1)
+mod1$aic
+plot(mod1, scale = -1)
+saveRDS(mod1, 'mod1')
+
+predict(mod1, dat, type = 'response')
+predictions <- predict(preds, mod1, type = 'response', index = 1:9)
+names(predictions) <- biomes$megabiome %>% levels
+rasterVis::levelplot(predictions)
 ```
 
 ```{r}
