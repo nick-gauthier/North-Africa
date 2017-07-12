@@ -25,20 +25,20 @@ gdd5 <- raster('gdd5_global.tif')
 
 
 ```{r}
-tropical.evergreen <- (t_cold > 15.5 & alpha > .8)
-tropical.raingreen <- (t_cold > 15.5 & alpha > .45 & alpha < .95)
-warm.temperate.evergreen <- (t_cold > 5 & alpha > .65)
-temperate.summergreen <- (t_cold > -15 & t_cold < 15.5 & gdd5 > 1200 & alpha > .65)
-cool.temperate.conifer <- (t_cold > -19 & t_cold < 5 & gdd5 > 900 & alpha > .65)
-boreal.evergreen.conifer <- (t_cold > -35 & t_cold < -2 & gdd5 > 350 & alpha > .75)
-boreal.summergreen <- (t_cold < 5 & gdd5 > 350 & alpha > .65)
+tropical.evergreen <- (t_cold >= 15.5 & alpha >= .8)
+tropical.raingreen <- (t_cold >= 15.5 & alpha >= .45 & alpha <= .95)
+warm.temperate.evergreen <- (t_cold >= 5 & alpha >= .65)
+temperate.summergreen <- (t_cold >= -15 & t_cold <= 15.5 & gdd5 >= 1200 & alpha >= .65)
+cool.temperate.conifer <- (t_cold >= -19 & t_cold <= 5 & gdd5 >= 900 & alpha >= .65)
+boreal.evergreen.conifer <- (t_cold >= -35 & t_cold <= -2 & gdd5 >= 350 & alpha >= .75)
+boreal.summergreen <- (t_cold <= 5 & gdd5 >= 350 & alpha >= .65)
 
-succulent <- (t_cold > 5 & alpha > .28)
-warm.grass.shrub <- (t_warm > 22 & alpha > .18)
-cool.grass.shrub <- (gdd5 > 500 & alpha > .33)
-cold.grass.shrub <- (gdd0 > 100 & alpha > .33)
-hot.desert.shrub <- (t_warm > 22)
-cold.desert.shrub <- (gdd0 > 100)
+succulent <- (t_cold >= 5 & alpha >= .28)
+warm.grass.shrub <- (t_warm >= 22 & alpha >= .18)
+cool.grass.shrub <- (gdd5 >= 500 & alpha >= .33)
+cold.grass.shrub <- (gdd0 >= 100 & alpha >= .33)
+hot.desert.shrub <- (t_warm >= 22)
+cold.desert.shrub <- (gdd0 >= 100)
 ```
 
 ```{r}
