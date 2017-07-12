@@ -57,8 +57,23 @@ First import and processthe BIOME 6000 data.
 biomes <- readxl::read_excel('BIOME4-2.xls', sheet = 3) %>% 
   dplyr::select(Lon, Lat, biome = Biome00k, megabiome = MegaBiome00k) %>%
   filter(!is.na(biome)) %>%
-  mutate(megabiome = if_else(megabiome == 'dry tundra', 'tundra', megabiome)) %>%
-  mutate(biome = as.factor(biome), megabiome = as.factor(megabiome), megabiome.int = as.numeric(megabiome) - 1)
+  mutate(megabiome = if_else(megabiome == 'dry tundra', 'tundra', megabiome))
+```
+
+
+# fix desert locations
+
+```{r}
+avhrr <- raster('Data/AVHRR_1km_LANDCOVER_1981_1994.GLOBAL.tif')
+avhrr[avhrr != 12] <- NA
+bare.points <- sampleRandom(avhrr, 1000, xy = T, na.rm = T) %>%
+  as_tibble %>%
+  transmute(Lon = x, Lat = y, biome = NA, megabiome = 'bare')
+rm(avhrr)
+```
+
+```{r}
+biomes <- rbind(bare.points, biomes)
 
 ggplot(biomes, aes(Lon, Lat)) +
   borders("world", colour="gray50", fill="gray50") +
@@ -69,6 +84,8 @@ ggplot(biomes, aes(Lon, Lat)) +
 ggplot(biomes, aes(x = megabiome, fill = megabiome)) +
   geom_bar()
 ```
+
+
 
 ```{r}
 bioclim <- brick('Data/CHELSA/bioclim.nc')
@@ -169,7 +186,24 @@ Now use prentice variables.
 ```{r}
 preds2 <- brick(c(alpha, gdd5, t_cold, t_warm))
 names(preds2) <- c('alpha', 'gdd5', 't_cold', 't_warm')
-dat2 <- cbind(biomes, raster::extract(preds2, biomes[,1:2], na.rm = T))
+dat2 <- cbind(biomes, raster::extract(preds2, biomes[,1:2], na.rm = T)) %>%
+  mutate(megabiome = if_else((megabiome == 'temperate forest' & gdd5 <= 900 & gdd5 >= 350), 'boreal forest', megabiome)) %>%
+  mutate(megabiome = if_else((megabiome == 'temperate forest' | megabiome == 'boreal forest') & gdd5 < 350, 'tundra', megabiome)) %>%
+  mutate(biome = as.factor(biome), megabiome = as.factor(megabiome), megabiome.int = as.numeric(megabiome) - 1)
+
+test<- dat2 %>% filter(megabiome == 'temperate forest' & gdd5 <= 900 & gdd5 >= 350)
+test <- dat2 %>% filter((megabiome == 'temperate forest' | megabiome == 'boreal forest') & gdd5 < 350)
+ggplot(test, aes(Lon, Lat)) +
+  borders("world", colour="gray50", fill="gray50") +
+  geom_point(aes(color = megabiome)) +
+  coord_fixed() +
+  theme_void()
+
+ggplot(test, aes(x = megabiome, fill = megabiome)) +
+  geom_bar()
+
+
+
 
 mod2 <- gam(list(megabiome.int 
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
@@ -180,6 +214,24 @@ mod2 <- gam(list(megabiome.int
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr')), family = multinom(K = 8), method = 'REML', select = F, data = dat2, optimizer = 'perf')
+
+saveRDS(mod2, 'mod2')
+
+mod2
+summary(mod2)
+plot(mod2)
+
+predictions <- predict(preds2, mod2, type = 'response', index = 1:9)
+names(predictions) <- dat2$megabiome %>% levels
+rasterVis::levelplot(predictions)
+
+levelplot(gdd5)
+biome.preds <- which.max(predictions)# %>% ratify
+rasterVis::gplot(biome.preds) + geom_tile(aes(fill = as.factor(value))) + coord_fixed()
+rasterVis::gplot(predictions[[1]]) + geom_tile(aes(fill = value)) + coord_fixed()
+
+
+residuals(mod2)
 
 ```
 
