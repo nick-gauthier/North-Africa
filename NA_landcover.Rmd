@@ -34,7 +34,16 @@ plot(modern_predictors)
 Load a ppreviously fitted gam model
 ```{r}
 veg_gam <- readRDS('mod2')
-lc_mod <- predict(modern_predictors, veg_gam, type = 'response', index = 1:9) %>% 
+mod_predictions <- predict(modern_predictors, veg_gam, type = 'response', index = 1:9)
+
+uncertainty <- mod_predictions %>% 
+  as.data.frame(na.rm = T, xy = T) %>%
+  gather(var, val, 3:11) %>%
+  group_by(x, y) %>%
+  summarise(p1 = max(val), p2 = max(val[val != p1])) %>%
+  mutate(ui = (p1 - p2) / p1)
+
+lc_mod <- mod_predictions%>% 
   which.max %>% 
   as.data.frame(na.rm = T, xy = T) %>% 
   mutate(class = recode_factor(as.factor(layer),
@@ -43,12 +52,15 @@ lc_mod <- predict(modern_predictors, veg_gam, type = 'response', index = 1:9) %>
                                `4` = 'Grassland and dry shrubland',
                                `3` = 'Desert (vegetated)',
                                `1` = 'Desert (bare)', .default = 'Temperate forest'  # there a a handful of pixels with other types not visibleonthe mapsscale, replace with temperate forest for clarity as these pixels all are found in these areas
-                           ))
+                           ))  %>%
+  left_join(uncertainty)
+
+
 
 lc_colors <- c('#016400', '#018200', '#97bf47','#dcce00',  '#fffbc3')
 
 ggplot(lc_mod, aes(x, y)) + 
-  geom_tile(aes(fill = class)) + 
+  geom_tile(aes(alpha = ui, fill = class)) + 
   scale_fill_manual(values = lc_colors) + 
   theme_void() + 
   coord_fixed()
