@@ -116,44 +116,17 @@ c.sg <- raster('~/Downloads/SoilGrids250/OCSTHA_M_30cm_250m_ll.tif') %>%
 endCluster()
 ```
 
-```{r}
-preds <- brick(c(clim.pca$map[[1:4]], gdd, alpha, pet, ph.sg, c.sg))
-names(preds) <- c('PC1', 'PC2', 'PC3', 'PC4', 'gdd', 'alpha', 'pet', 'ph', 'carbon')
-
-dat <- cbind(biomes, raster::extract(preds, biomes[,1:2], na.rm = T))
-```
-
-
-
-Confirming that the 4 pcas are the best, if we add 4 more pcas, they are penalized to 0.
-```{r}
-boreal.mod.pca <- mutate(dat, binary = if_else(megabiome.int == 0, 1, 0)) %>%
-  gam(binary ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'), data = ., method = 'REML', select = T, family = binomial, cluster = cl)
-plot(boreal.mod.pca)
-
-summary(boreal.mod.pca)
-gam.check(boreal.mod.pca)
-boreal.mod.pca$aic
-boreal.mod$aic
-
-
-boreal.mod.pca2 <- mutate(dat, binary = if_else(megabiome.int == 0, 1, 0)) %>%
-  gam(binary ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr') + s(PC5, bs = 'cr') + s(PC6, bs = 'cr') + s(PC7, bs = 'cr') + s(PC8, bs = 'cr'), data = ., method = 'REML', select = T, family = binomial, cluster = cl)
-
-plot(boreal.mod.pca2)
-summary(boreal.mod.pca2)
-boreal.mod.pca2$aic
-```
-
-```{r}
-boreal.mod <- mutate(dat, binary = if_else(megabiome.int == 0, 1, 0)) %>%
-  gam(binary ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr')
-      + s(gdd, bs = 'cr') + s(alpha, bs = 'cr') + s(pet, bs = 'cr') + s(ph, bs = 'cr') + s(carbon, bs = 'cr'), data = ., method = 'REML', select = T, family = binomial, cluster = cl)
-plot(boreal.mod)
-```
 
 
 ```{r}
+preds <- brick(c(clim.pca$map[[1:4]], gdd5))#, alpha, pet, ph.sg, c.sg))
+names(preds) <- c('PC1', 'PC2', 'PC3', 'PC4', 'gdd5') #, 'alpha', 'pet', 'ph', 'carbon')
+
+dat <- cbind(biomes, raster::extract(preds, biomes[,1:2], na.rm = T)) %>%
+  mutate(megabiome = if_else((megabiome == 'temperate forest' & gdd5 <= 900 & gdd5 >= 350), 'boreal forest', megabiome)) %>%
+  mutate(megabiome = if_else((megabiome == 'temperate forest' | megabiome == 'boreal forest') & gdd5 < 350, 'tundra', megabiome)) %>%
+  mutate(biome = as.factor(biome), megabiome = as.factor(megabiome), megabiome.int = as.numeric(megabiome) - 1)
+
 mod1 <- gam(list(megabiome.int 
                  ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
                  ~ s(PC1, bs = 'cr') + s(PC2, bs = 'cr') + s(PC3, bs = 'cr') + s(PC4, bs = 'cr'),
@@ -170,7 +143,7 @@ summary(mod1)
 mod1$aic
 plot(mod1, scale = -1)
 saveRDS(mod1, 'mod1')
-
+mod1 <- readRDS('mod1')
 predict(mod1, dat, type = 'response')
 predictions <- predict(preds, mod1, type = 'response', index = 1:9)
 names(predictions) <- biomes$megabiome %>% levels
@@ -217,6 +190,7 @@ ggplot(biome.preds, aes(x, y)) +
   scale_fill_brewer(palette = 'Paired') + 
   theme_void() + 
   coord_fixed()
+mod2$aic
 ```
 
 
