@@ -124,7 +124,7 @@ endCluster()
 
 mh_predictors <- brick(c(t_warm, t_cold, alpha,gdd5))
 names(mh_predictors) <- c('t_warm', 't_cold', 'alpha', 'gdd5')
-rm(prec, tmin, tmax, pet, ksoil, aet, aet.brick, swc.tmp, swc, srad, temp, t_warm, t_cold, alpha, gdd5)
+rm(prec, tmin, tmax, pet, ksoil, aet, aet.brick, swc.tmp, swc, temp, t_warm, t_cold, alpha, gdd5)
 
 plot(mh_predictors)
 ```
@@ -150,4 +150,141 @@ ggplot(lc_mh, aes(x, y)) +
   coord_fixed()
 ```
 
+
+
+## whats the difference between climate models
+```{r}
+prec <- brick('Data/CHELSA/prec.nc') %>% crop(bbox)
+
+trace.prec <- (brick('~/gdrive/Projects/Neolithic Spread/trace.01-36.22000BP.cam2.PRECC.22000BP_decavgDJF_400BCE.nc') +
+  brick('~/gdrive/Projects/Neolithic Spread/trace.01-36.22000BP.cam2.PRECL.22000BP_decavgDJF_400BCE.nc')) %>% 
+  rotate %>%
+  crop(bbox) %>%
+  resample(prec) %>%
+  mask(prec[[1]])
+
+ad200 <- mean(trace.prec[[2021:2026]])
+ad850 <- mean(trace.prec[[2090:2095]])
+ad1950 <- mean(trace.prec[[2199:2204]])
+ad1850 <- trace
+
+plot(brick(c(ad1950, sum(prec[[c(12, 1, 2)]]))))
+
+brick(c(ad200 - ad1950, ad850 - ad1950, ad200 - ad850)) %>% levelplot
+# so it looks like the big change is from 200 to 850
+
+
+lm.prec.present <- brick('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.PRECT.085001-185012.nc') %>%
+  .[[12000:12012]] %>%
+  rotate %>%
+  crop(bbox) %>%
+  resample(prec) %>%
+  mask(prec[[1]])
+
+plot(brick(c(sum(lm.prec[[c(1,2,12)]]), trace.prec[[2189]] %>% resample(prec) %>% mask(prec[[1]]))))
+# and trace and lm are surprisngly close at preindustrial periods
+```
+
+```{r}
+
+getLM <- function(x){
+  brick(x) %>%
+  .[[1:60]] %>%
+  rotate %>%
+  crop(bbox) %>%
+  resample(prec) %>%
+  mask(prec[[1]]) %>%
+  stackApply(1:12, mean)
+}
+
+lm.prec <- getLM('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.PRECT.085001-185012.nc') %>%
+  `*`(2.628e+9)
+
+lm.tmin <- getLM('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.TREFMNAV.085001-185012.nc') %>%
+  `-`(273.15)
+
+lm.tmax <- getLM('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.TREFMXAV.085001-185012.nc') %>%
+  `-`(273.15)
+
+lm.pet <- hargreaves(lm.tmin %>% getValues %>% t, 
+                  lm.tmax %>% getValues %>% t, 
+                  Ra = srad %>% getValues %>% t, 
+                  Pre = lm.prec %>% getValues %>% t, na.rm = T) %>%
+  t %>%
+  setValues(lm.tmin, .)
+
+swc <- setValues(lm.pet[[1]], 100) %>% mask(lm.pet[[1]])
+aet.brick <- setValues(lm.pet, 0) %>% mask(lm.pet[[1]])
+
+for(a in 1:10){
+  for(i in 1:12){
+    ksoil <- swc / 350
+    lm.aet <- lm.pet[[i]] * ksoil
+    aet.brick[[i]] <- lm.aet
+    swc.tmp <- swc + lm.prec[[i]] * (1 - .15) - lm.aet
+    swc <- reclassify(swc.tmp, c(-Inf, 0, 0, 350, Inf, 350))
+  }
+}
+
+alpha <- sum(aet.brick) / sum(lm.pet)
+
+lm.temp <- (lm.tmax + lm.tmin) / 2
+t_warm <- max(lm.temp)
+t_cold <- min(lm.temp)
+
+gdd5_interp <- function(x){
+  if(any(is.na(x))){return(NA)} else{
+    daily <- gam(x ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366))) %>%
+      predict.gam(data.frame(doy = 1:365)) 
+    daily[daily < 5] <- 5
+    return(sum(daily - 5))
+  }
+}
+
+doy <-c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349)
+
+beginCluster(4)
+gdd5 <- clusterR(lm.temp, calc, args = list(fun = gdd5_interp), export = 'doy')
+endCluster()
+
+lm_predictors <- brick(c(t_warm, t_cold, alpha,gdd5))
+names(lm_predictors) <- c('t_warm', 't_cold', 'alpha', 'gdd5')
+rm(lm.prec, lm.tmin, lm.tmax, lm.pet, ksoil, lm.aet, aet.brick, swc.tmp, swc, lm.temp, t_warm, t_cold, alpha, gdd5)
+
+plot(lm_predictors)
+```
+
+```{r}
+predictions_lm <- predict(lm_predictors, veg_gam, type = 'response', index = 1:9)
+
+uncertainty <- predictions_lm %>% 
+  as.data.frame(na.rm = T, xy = T) %>%
+  gather(var, val, 3:11) %>%
+  group_by(x, y) %>%
+  summarise(p1 = max(val), p2 = max(val[val != p1])) %>%
+  mutate(ui = (p1 - p2) / p1)
+
+# there are a handful of pixels with other types not visibleonthe mapsscale, replace with temperate forest for clarity as these pixels all are found in these areas
+lc_lm <- predictions_lm %>% 
+  which.max %>% 
+  as.data.frame(na.rm = T, xy = T) %>% 
+  mutate(class = recode_factor(as.factor(layer),
+                               `6` = 'Temperate forest',
+                               `9` = 'Warm-temperate forest',
+                               `4` = 'Grassland and dry shrubland',
+                               `3` = 'Desert (vegetated)',
+                               `1` = 'Desert (bare)', .default = 'Temperate forest'  
+                           )) %>%
+  left_join(uncertainty)
+
+
+lc_colors <- c('#016400', '#018200', '#97bf47','#dcce00',  '#fffbc3')
+
+ggplot(lc_lm, aes(x, y)) + 
+  geom_tile(aes(alpha = ui, fill = class)) + 
+  scale_fill_manual(values = lc_colors) + 
+  theme_void() + 
+  coord_fixed()
+
+```
 
