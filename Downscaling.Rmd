@@ -1,0 +1,201 @@
+---
+title: "Downscaling"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(raster)
+library(rasterVis)
+library(tidyverse)
+library(mgcv)
+library(fields)
+library(parallel)
+```
+
+
+## Downscaling
+
+Interpolate climate data using splines.
+```{r warnings = F}
+tpsInterp <- function(rast.brick){
+  target <- resample(rast.brick[[1]], prec.obs[[1]])
+  
+  lapply(1:nlayers(rast.brick), function(rast.index){
+    rast.map <- rast.brick[[rast.index]]
+    xy <- data.frame(xyFromCell(rast.map, 1:ncell(rast.map)))
+    v <- getValues(rast.map)
+    tps <- Tps(xy, v)
+    interpolate(target, tps)
+  }) %>% unlist %>% brick
+}
+
+```
+
+```{r}
+bbox <- extent(-10, 20, 28, 38)
+
+elev1k <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
+
+na.mask <- elev1k %>% aggregate(fact = 5) %>% clump %>% mask(., ., maskvalue = 7, inverse = T) %>% aggregate(fact = 2)
+```
+
+```{r}
+prec.obs <- brick('Data/CHELSA/prec.nc') %>% crop(bbox) %>% mask(na.mask)
+elev <- resample(elev1k, prec.obs) %>% mask(na.mask)
+dco <- elev %>%
+  reclassify(c(-Inf, Inf, NA, NA, NA, 1)) %>% # reverse NA and non-NA cells
+  distance(doEdge = T) %>% # calculate the distances
+  mask(elev) %>% # mask out ocean cells  
+  `/`(1000) # convert to km
+aspect <- elev %>% terrain(opt='aspect', unit = 'degrees')
+
+slope <- elev1k %>% 
+  terrain(opt = 'slope', unit = 'degrees') %>% aggregate(fact = 10, fun = median) %>% mask(na.mask)
+
+u <- brick('~/Downloads/b40.20th.track1.1deg.005.cam2.h0.U.185001-200512-002.nc', level = 23) %>%
+  .[[1212:1871]] %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>%
+  tpsInterp %>%
+  stackApply(1:12, mean) %>%
+  crop(bbox) %>%
+  mask(na.mask)
+
+v <- brick('~/Downloads/b40.20th.track1.1deg.005.cam2.h0.V.185001-200512-003.nc', level = 23) %>%
+  .[[1212:1871]] %>%
+  rotate %>%
+  crop(bbox) %>%
+  tpsInterp %>%
+  stackApply(1:12, mean) %>%
+  crop(bbox) %>%
+  mask(na.mask)
+
+streamplot(stack(u[[1]], v[[1]]), isField = 'dXY')
+streamplot(stack(u[[7]], v[[7]]), isField = 'dXY')
+
+
+dir <- (270 - atan2(v, u) * (180 / pi)) %% 360
+vel <- sqrt(u ^ 2 + v ^ 2)
+
+delta <- abs(dir - aspect) # distance between wind angle and slope orientation
+values(delta) <- ifelse(values(delta) > 180, 360 - values(delta), values(delta))
+oro <- sin(slope * 2 * pi / 180) * cos(delta * pi / 180) * vel * .5
+
+levelplot(dir)
+```
+
+
+```{r}
+test <- dir[[7]] %>% 
+  reclassify(c(0, 45, 128, 45, 90, 1, 90, 135, 2, 135, 180, 4, 180, 225, 8, 225, 270, 16, 270, 315, 32, 315, 360, 64)) %>%
+  flowPath(41900)
+  
+plot(elev) + lines(xyFromCell(elev, test))
+
+xyFromCell(elev, test) %>% length
+dir.discrete <- dir %>% 
+  reclassify(c(0, 45, 128, 45, 90, 1, 90, 135, 2, 135, 180, 4, 180, 225, 8, 225, 270, 16, 270, 315, 32, 315, 360, 64))
+
+
+test2 <- mclapply(Which(elev, cells = T), function(x){
+    dir.discrete[[1]] %>%
+    flowPath(x) %>%
+    xyFromCell(elev, .) %>%
+    length
+}, mc.cores = 4)
+plot(test)
+```
+
+```{r}
+month <- prec.obs %>% setValues(c(as.factor(rep(1:12, each = ncell(elev)))))
+levelplot(month)
+
+lat <- elev %>%
+     coordinates %>%
+     .[,2] %>% 
+     setValues(elev, .)
+
+lon <- elev %>%
+     coordinates %>%
+     .[,1] %>% 
+     setValues(elev, .)
+
+precl <- brick('Data/CCSM4/b40.20th.track1.1deg.005.cam2.h0.PRECL.185001-200512.nc') %>% 
+  .[[1212:1871]] %>%
+  stackApply(1:12, mean) %>%
+  `*`(2629743830) %>%
+  rotate %>%
+  crop(bbox) %>%
+  tpsInterp %>%
+  mask(prec.obs[[1]])
+
+precc <- brick('Data/CCSM4/b40.20th.track1.1deg.005.cam2.h0.PRECC.185001-200512.nc') %>% 
+  .[[1212:1871]] %>%
+  stackApply(1:12, mean) %>%
+  `*`(2629743830) %>%
+  rotate %>%
+  crop(bbox) %>%
+  tpsInterp %>%
+  mask(prec.obs[[1]])
+
+rh <- brick('Data/CCSM4/')
+
+levelplot(brick(c(sum(prec.obs), sum(precl) + sum(precc), sum(prec.obs) - (sum(precl) + sum(precc)))))
+
+prec.res <- prec.obs - (precl + precc)
+
+
+vars <- sapply(1:12, function(x){
+  brick(prec.obs[[x]], precc[[x]], precl[[x]], oro[[x]], dco, elev, lat, lon, month[[x]]) %>%
+    setNames(c('prec.obs', 'precc', 'precl', 'oro', 'dco', 'elev', 'lat', 'lon', 'month'))
+})
+
+prec.dat <- lapply(vars, as.data.frame, na.rm = T) %>% 
+  do.call(rbind, .) %>%
+  filter(prec.obs > 0)
+
+prec.mod <- gam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+prec.mod2 <- gam(prec.obs ~ s(precc, bs = 'cr', k = 10) +
+                  s(precl, bs = 'cr', k = 10),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+prec.mod3 <- gam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                   s(elev, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+prec.mod4 <- gam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                   s(elev, bs = 'cr') +
+                   s(oro, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+prec.mod5 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                   s(elev, bs = 'cr') +
+                   s(oro, bs = 'cr') +
+                   ti(precl, oro),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod6 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                   s(elev, bs = 'cr') +
+                   s(oro, k = 20, bs = 'cr') +
+                   s(dco, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod7 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                   s(elev, bs = 'cr') +
+                   s(oro, bs = 'cr') +
+                   ti(precl, dco, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+plot(prec.mod6)
+
+
+prec.mod$aic;prec.mod2$aic;prec.mod3$aic;prec.mod4$aic;prec.mod5$aic;prec.mod6$aic;prec.mod7$aic
+
+
+preds <- lapply(vars, predict, prec.mod7, type = 'response') %>% brick
+levelplot(prec.obs - preds, at = seq(-150, 150, 20), par.settings = BuRdTheme())
+```
