@@ -16,6 +16,7 @@ library(tidyverse)
 library(mgcv)
 library(fields)
 library(parallel)
+library(gdistance)
 ```
 
 
@@ -48,6 +49,8 @@ dco <- elev %>%
   mask(elev) %>% # mask out ocean cells  
   `/`(1000) # convert to km
 
+plot(brick(elev, rough, dco))
+
 #the following two maps will be used for wind calculations, so reproject to LCC to preserve angles.
 aspect <- elev  %>% terrain(opt='aspect', unit = 'degrees') %>% projectRaster(crs = "+proj=lcc")
 
@@ -56,14 +59,25 @@ slope <- elev1k %>%
   aggregate(fact = 10, fun = median) %>% 
   mask(na.mask) %>% 
   projectRaster(crs = "+proj=lcc") 
+
+plot(brick(aspect, slope))
 ```
 
+### Observed Climate
+Import observed CHELSA data.
+```{r}
+prec.obs <- brick('Data/CHELSA/prec.nc') %>% crop(bbox) %>% mask(na.mask)
+levelplot(prec.obs)
 
+temp.obs <- brick('Data/CHELSA/temp.nc') %>% crop(bbox) %>% mask(na.mask)
+levelplot(temp.obs)
+```
+
+### GCM Variables
 Create a function to interpolate the coarse resolution GCM data using splines.
 ```{r warnings = F}
 tpsInterp <- function(rast.brick){
   target <- resample(rast.brick[[1]], prec.obs[[1]])
-  
   lapply(1:nlayers(rast.brick), function(rast.index){
     rast.map <- rast.brick[[rast.index]]
     xy <- data.frame(xyFromCell(rast.map, 1:ncell(rast.map)))
@@ -152,10 +166,9 @@ for(i in 1:12){
 }) %>% unlist
 }
 
-
-levelplot(1/aco*precc)
 ```
 
+Auxiliary variables.
 ```{r}
 month <- prec.obs %>% setValues(c(as.factor(rep(1:12, each = ncell(elev)))))
 lat <- elev %>%
@@ -167,55 +180,175 @@ lon <- elev %>%
      coordinates %>%
      .[,1] %>% 
      setValues(elev, .)
-
-precl <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.PRECL.185001-200512.nc') %>% 
-  .[[1212:1871]] %>%
-  `*`(2629743830) %>%
-  rotate %>%
-  crop(bbox) %>%
-  tpsInterp %>%
-  stackApply(1:12, mean) %>%
-  crop(bbox) %>%
-  mask(na.mask)
-
-precc <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.PRECC.185001-200512.nc') %>% 
-  .[[1212:1871]] %>%
-  `*`(2629743830) %>%
-  rotate %>%
-  crop(bbox) %>%
-  tpsInterp %>%
-  stackApply(1:12, mean) %>%
-  crop(bbox) %>%
-  mask(na.mask)
-precc[precc[] <= 0] <- 0.001
-precl[precl[] <= 0] <- 0.001
-
-levelplot(brick(c(sum(prec.obs), sum(precl) + sum(precc), sum(prec.obs) - (sum(precl) + sum(precc)))))
 ```
 
-```{r}
-prec.res <- prec.obs - (precl + precc)
-
-levelplot(prec.res, par.settings = RdBuTheme(), at = seq(-150,150,20))
-res <- sum(prec.res)
-plot(dco, prec.res)
-plot(dco, mean(prec.res))
-plot(oro, prec.res)
-plot(dir, prec.res)
-plot(dir, vel)
-```
-
+### Collect the data
 ```{r}
 aco <- oro
 vars <- sapply(1:12, function(x){
-  brick(prec.obs[[x]], precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
-        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], oro2[[x]], aco[[x]], dco, rough, elev, lat, lon, month[[x]]) %>%
-    setNames(c('prec.obs', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'oro2', 'aco', 'dco', 'rough', 'elev', 'lat', 'lon', 'month'))
+  brick(temp.obs[[x]], prec.obs[[x]], trefht[[x]], precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
+        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], lift.angle[[x]], aco[[x]], dco, rough, elev, slope%>% projectRaster(elev), aspect%>% projectRaster(elev), lat, lon, month[[x]]) %>%
+    setNames(c('temp.obs', 'prec.obs', 'trefht', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'lift.angle', 'aco', 'dco', 'rough', 'elev', 'slope', 'aspect', 'lat', 'lon', 'month'))
 })
 
-prec.dat <- lapply(vars, as.data.frame, na.rm = T) %>% 
-  do.call(rbind, .) %>%
-  filter(prec.obs > 0)
+dat <- lapply(vars, as.data.frame, na.rm = T) %>% 
+  do.call(rbind, .)
+```
+
+## Temperature model
+Temperature is well constrained in the GCM, so the model doesn't need to be too complicated. A model using elevation and GCM temperature seems reasonable.
+```{r}
+ggplot(dat, aes(trefht, temp.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+From the above plot it looks like the relationship is roughly linear and constant throughout the year, with deviations due to elevation.
+Make sure there is a constant relationship with elevation.
+```{r}
+ggplot(dat, aes(elev, temp.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+The elevation slope appears constant, but the intercept depends on the season.
+First fit a model with just temperature from the GCM, and then one with temperature and elevation
+```{r}
+temp.mod1 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10), data = dat)
+summary(temp.mod1)
+plot(temp.mod1)
+```
+Pretty good, 73% deviance explained and AIC of 1875984.
+
+Elevation seems to explain most of the variance in the residuals.
+```{r}
+ggplot(dat, aes(elev, temp.mod1$residuals))  +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+Now fit two elevation models, one with a constant elevation lapse rate and one with a seasonally varying one.
+```{r}
+temp.mod2 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   s(elev, bs = 'cr', k = 10), data = dat)
+summary(temp.mod2)
+plot(temp.mod2)
+temp.mod2$aic
+```
+Better aic (1836350), but not by much. Try seasonal variability.
+```{r}
+temp.mod3 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 12)), data = dat, knots = list(month = c(0.5, seq(1, 12, length = 10), 12.5)))
+summary(temp.mod3)
+plot(temp.mod3, pers = T)
+```
+Thats much better, 94.7% deviance explained and 1347038 aic. The tensor product smooth between month and elevation leads to increasedlapse rates in the summer.
+
+Now let's plot the predictions of the three models, and compare them to observations.
+
+```{r}
+temp.preds <- lapply(vars, predict, temp.mod3) %>% brick
+
+levelplot(temp.obs - temp.preds, par.settings = RdBuTheme(), at = seq(-11, 11, 1))
+``` 
+
+Let's add in distance from the ocean.
+```{r}
+temp.mod4 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   s(dco, bs ='cr', k = 10) +
+                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+summary(temp.mod4)
+temp.mod4$aic
+plot(temp.mod4, pers = T)
+```
+Look at the residuals again
+```{r}
+temp.preds <- lapply(vars, predict, temp.mod4) %>% brick
+levelplot(temp.obs - temp.preds, par.settings = RdBuTheme(), at = seq(-10, 10, 1))
+``` 
+
+Elevation looks fine.
+```{r}
+ggplot(dat, aes(elev, temp.mod4$residuals))  +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+so does temperature.
+```{r}
+ggplot(dat, aes(trefht, temp.mod4$residuals))  +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+There does seem to be some seasonal signal in the residuals against dco, perhaps seasonally varying dco as well?
+```{r}
+ggplot(dat, aes(dco, temp.mod4$residuals))  +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+```{r}
+temp.mod5 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+summary(temp.mod5)
+temp.mod5$aic
+plot(temp.mod5, pers = T)
+```
+
+```{r}
+ggplot(dat, aes(slope, temp.mod5$residuals))  +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+Try incorporating slope and aspect.
+```{r}
+temp.mod6 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   s(slope, bs = 'cr', k = 10) +
+                   s(aspect, bs = 'cc', k = 10) +
+                   ti(slope, aspect, bs = c('cr','cc')) +
+                   te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+temp.mod7 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   te(slope, aspect, bs = c('cr','cc')) +
+                   te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+temp.mod8 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   s(slope, bs = 'cr', k = 10) +
+                   ti(slope, aspect, bs = c('cr','cc')) +
+                   te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+
+temp.mod6$aic;temp.mod7$aic;temp.mod8$aic
+plot(temp.mod7, pers = T)
+``` 
+Model7, with a tensor smooth of slope andaspect (rather than more complex interactions) seems like the best bet (low aic but still interpretable).
+
+```{r}
+temp.preds <- lapply(vars, predict, temp.mod6) %>% brick
+levelplot(temp.obs - temp.preds, par.settings = RdBuTheme(), at = seq(-7, 7, .7))
+levelplot(brick(temp.preds[[1]], temp.obs[[1]], temp.preds[[7]], temp.obs[[7]]))
+```
+
+Its official, let's use temp.mod6 as the official model.
+```{r}
+temp.mod <- temp.mod6
+saveRDS(temp.mod, 'temp_mod')
+```
+
+little experiment with anomaly-based regression.
+
+```{r}
+levelplot(temp.obs - mean(temp.obs))
+levelplot(mean(temp.obs))
+
+plot(mean(temp.obs), elev)
+plot(mean(temp.obs), dco)
+plot(mean(temp.obs), projectRaster(slope, elev))
+plot(mean(temp.obs), mean(trefht))
+levelplot(brick(c(temp.obs - mean(temp.obs), trefht - mean(trefht))))
 ```
 
 ```{r}
@@ -237,6 +370,7 @@ ggplot(prec.dat, aes(elev, prec.obs)) +
   facet_wrap(~as.factor(month)) +
   theme_minimal()
 ```
+
 
 ```{r}
 ggplot(prec.dat, aes(rough*(1/dco), prec.obs)) +
