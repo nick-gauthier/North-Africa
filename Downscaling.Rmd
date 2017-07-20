@@ -62,8 +62,9 @@ levelplot(brick(aspect,aspect1))
 
 rough <- terrain(elev, opt = 'roughness')
 
+trefht <- brick()
 
-u <- brick('~/Downloads/b40.20th.track1.1deg.005.cam2.h0.U.185001-200512-002.nc', level = 23) %>%
+u <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.U.185001-200512.nc', level = 23) %>%
   .[[1212:1871]] %>%
   rotate %>%
   crop(bbox, snap = 'out') %>%
@@ -72,7 +73,7 @@ u <- brick('~/Downloads/b40.20th.track1.1deg.005.cam2.h0.U.185001-200512-002.nc'
   crop(bbox) %>%
   mask(na.mask)
 
-v <- brick('~/Downloads/b40.20th.track1.1deg.005.cam2.h0.V.185001-200512-003.nc', level = 23) %>%
+v <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.V.185001-200512.nc', level = 23) %>%
   .[[1212:1871]] %>%
   rotate %>%
   crop(bbox) %>%
@@ -134,46 +135,190 @@ lon <- elev %>%
      .[,1] %>% 
      setValues(elev, .)
 
-precl <- brick('Data/CCSM4/b40.20th.track1.1deg.005.cam2.h0.PRECL.185001-200512.nc') %>% 
+precl <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.PRECL.185001-200512.nc') %>% 
   .[[1212:1871]] %>%
-  stackApply(1:12, mean) %>%
   `*`(2629743830) %>%
   rotate %>%
   crop(bbox) %>%
   tpsInterp %>%
-  mask(prec.obs[[1]])
-
-precc <- brick('Data/CCSM4/b40.20th.track1.1deg.005.cam2.h0.PRECC.185001-200512.nc') %>% 
-  .[[1212:1871]] %>%
   stackApply(1:12, mean) %>%
+  crop(bbox) %>%
+  mask(na.mask)
+
+precc <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.PRECC.185001-200512.nc') %>% 
+  .[[1212:1871]] %>%
   `*`(2629743830) %>%
   rotate %>%
   crop(bbox) %>%
   tpsInterp %>%
-  mask(prec.obs[[1]])
-
-rh <- brick('Data/CCSM4/')
+  stackApply(1:12, mean) %>%
+  crop(bbox) %>%
+  mask(na.mask)
+precc[precc[] <= 0] <- 0.001
+precl[precl[] <= 0] <- 0.001
 
 levelplot(brick(c(sum(prec.obs), sum(precl) + sum(precc), sum(prec.obs) - (sum(precl) + sum(precc)))))
+```
 
+```{r}
 prec.res <- prec.obs - (precl + precc)
 
+levelplot(prec.res, par.settings = RdBuTheme(), at = seq(-150,150,20))
+res <- sum(prec.res)
+plot(dco, prec.res)
+plot(dco, mean(prec.res))
+plot(oro, prec.res)
+plot(dir, prec.res)
+plot(dir, vel)
+```
 
+```{r}
+aco <- oro
 vars <- sapply(1:12, function(x){
-  brick(prec.obs[[x]], precc[[x]], precl[[x]], oro[[x]], dco, elev, lat, lon, month[[x]]) %>%
-    setNames(c('prec.obs', 'precc', 'precl', 'oro', 'dco', 'elev', 'lat', 'lon', 'month'))
+  brick(prec.obs[[x]], precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
+        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], oro2[[x]], aco[[x]], dco, rough, elev, lat, lon, month[[x]]) %>%
+    setNames(c('prec.obs', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'oro2', 'aco', 'dco', 'rough', 'elev', 'lat', 'lon', 'month'))
 })
 
 prec.dat <- lapply(vars, as.data.frame, na.rm = T) %>% 
   do.call(rbind, .) %>%
   filter(prec.obs > 0)
+```
 
-prec.mod <- gam(prec.obs ~ s(precc, bs = 'cr') +
+```{r}
+prec.mod <- bam(prec.obs ~ s(precc, bs = 'cr') +
                   s(precl, bs = 'cr'),
-                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
-prec.mod2 <- gam(prec.obs ~ s(precc, bs = 'cr', k = 10) +
+                data = prec.dat, family = Gamma(link = 'log'))
+prec.mod1 <- bam(prec.obs ~ s(precc, bs = 'cr', k = 10) +
                   s(precl, bs = 'cr', k = 10),
-                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+                data = prec.dat, family = Gamma(link = 'log'))
+prec.mod2 <- bam(prec.obs ~ s(log(precc), bs = 'cr', k = 10) +
+                  s(log(precl), bs = 'cr', k = 10),
+                data = prec.dat, family = Gamma(link = 'log'))
+```
+Varying coefficient with elevation seasonally
+```{r}
+ggplot(prec.dat, aes(elev, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(prec.dat, aes(rough*(1/dco), prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+
+
+direction and season interaction
+```{r}
+ggplot(prec.dat, aes(dir, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(prec.dat, aes(dco, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+
+interaction doesn't vary seasonally
+```{r}
+ggplot(prec.dat, aes(dco*dir, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(prec.dat, aes(oro, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(prec.dat, aes(oro*dco, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(delta, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(vel, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(oro2, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(prec.dat, aes(lat, prec.obs)) +
+  geom_point(aes(color = elev), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(lon, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(precl, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(precc, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(as.factor(month))) +
+  geom_bar(aes(weight = prec.obs, fill = ..count..)) +
+  theme_minimal()
+```
+```{r}
+prec.dat %>% 
+  group_by(month) %>%
+  transmute(prc = mean(prec.obs)) %>%
+  ggplot(aes(month, prc))+
+  geom_line()
+```
+
+```{r}
 prec.mod3 <- gam(prec.obs ~ s(precc, bs = 'cr') +
                   s(precl, bs = 'cr') +
                    s(elev, bs = 'cr'),
