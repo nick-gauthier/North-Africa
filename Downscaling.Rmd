@@ -346,12 +346,174 @@ prec.mod7 <- bam(prec.obs ~ s(precc, bs = 'cr') +
                    s(oro, bs = 'cr') +
                    ti(precl, dco, bs = 'cr'),
                 data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
-plot(prec.mod6)
+prec.mod8 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                  s(aco, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod9 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                  te(aco, oro, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod10 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                  s(aco, bs = 'cr') +
+                    s(dco, bs = 'cr') +
+                    s(oro, k = 20, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod11 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                  s(aco, bs = 'cr') +
+                  s(oro, k = 20, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod12 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                    s(dco, bs = 'cr') +
+                    te(oro, aco),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod13 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                  s(aco, bs = 'cr') +
+                    s(dco, bs = 'cr') +
+                    te(oro, precl),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod14 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                  s(aco, bs = 'cr') +
+                    s(dco, bs = 'cr') +
+                    s(oro, k = 20, bs = 'cr') +
+                    ti(precl, aco),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod15 <- bam(prec.obs ~ s(precc, bs = 'cr') +
+                  s(precl, bs = 'cr') +
+                  s(elev, bs = 'cr') +
+                  s(aco, bs = 'cr') +
+                    te(oro, precl),
+                data = prec.dat, family = Gamma(link = 'log'), select = T, method = 'REML')
+prec.mod16 <- bam(prec.obs ~ s(precl, bs = 'cr') +
+                    s(precc, bs = 'cr') +
+                    s(elev, bs = 'cr') +
+                    te(dco, dir, bs = c('cr', 'cc')),
+                  data = prec.dat, family = Gamma(link = 'log'))
+prec.mod17 <- bam(prec.obs ~ s(precl, bs = 'cr') +
+                    s(precc, bs = 'cr') +
+                    s(elev, bs = 'cr') +
+                    te(dco, oro, k = c(5, 30)),
+                  data = prec.dat, family = Gamma(link = 'log'))
+
+prec.mod19 <- bam(prec.obs ~ s(precc, bs = 'cr',k = 30) +
+                  s(precl, bs = 'cr', k = 10) +
+                   s(elev, bs = 'cr') +
+                   te(dco, dir, bs = c('cr', 'cc')),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+
+prec.mod20 <- bam(prec.obs ~ s(precc, bs = 'cr',k = 30) +
+                  s(precl, bs = 'cr', k = 10) +
+                   s(elev, bs = 'cr') +
+                    s(oro, bs = 'cr', k = 30) +
+                   te(dco, dir, bs = c('cr', 'cc')),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+
+prec.mod21 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc')) +
+                  s(precl, bs = 'cr', k = 10) +
+                   s(elev, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+
+prec.mod22 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                  s(precl, bs = 'cr', k = 10) +
+                   s(elev, bs = 'cr') +
+                  te(dco, dir, bs = c('cr', 'cc')),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
+prec.mod23 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                  s(precl, bs = 'cr', k = 10) +
+                   s(elev, bs = 'cr') +
+                    s(oro, bs = 'cr', k = 30) +
+                  te(dco, dir, bs = c('cr', 'cc')),
+                data = prec.dat, family = Gamma(link = 'log'), method = 'REML')
 
 
-prec.mod$aic;prec.mod2$aic;prec.mod3$aic;prec.mod4$aic;prec.mod5$aic;prec.mod6$aic;prec.mod7$aic
+knots <- list(month = c(0.5, seq(1, 12, length = 10), 12.5))
+
+prec.mod24 <- bam(prec.obs ~ s(month, bs = 'cc', k = 12) +
+                    s(precc, bs = 'cr', k = 10) +
+                    s(precl, bs = 'cr', k = 10) +
+                    ti(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                   s(elev, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
+
+prec.mod25 <- bam(prec.obs ~ 
+                    s(precl, bs = 'cr', k = 10) +
+                    te(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                   s(elev, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
+
+prec.mod26 <- bam(prec.obs ~ 
+                    s(precl, bs = 'cr', k = 10) +
+                    te(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                   s(elev, bs = 'cr') +
+                    te(rough, dco, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
+
+prec.mod27 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                    te(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                   s(elev, bs = 'cr') +
+                    s(oro, bs = 'cr', k = 30) +
+                    te(rough, dco, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
+
+prec.mod28 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                    te(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                   s(elev, bs = 'cr') +
+                    s(oro, bs = 'cr', k = 30) +
+                    s(vel, bs = 'cr', k = 10) +
+                    te(rough, dco, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
+prec.mod29 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                    te(precc, month, bs = c('cr', 'cc'), k = c(10, 12)) +
+                   s(elev, bs = 'cr') +
+                    s(oro, bs = 'cr', k = 30) +
+                    te(vel, delta) +
+                    te(rough, dco, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
+
+prec.mod30 <- bam(prec.obs ~ 
+                    s(precl, bs = 'cr', k = 10) +
+                    s(precc, as.factor(month), bs = 'fs') +
+                   s(elev, bs = 'cr'),
+                data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
+
+plot(prec.mod25, pers = T)
+summary(prec.mod24)
+
+prec.mod22$residuals^2 %>% mean %>% sqrt
+
+prec.mod$aic;prec.mod1$aic;prec.mod2$aic;prec.mod3$aic;prec.mod4$aic;prec.mod5$aic;prec.mod6$aic;prec.mod7$aic;prec.mod8$aic;prec.mod9$aic;prec.mod10$aic;prec.mod11$aic;prec.mod12$aic;prec.mod13$aic;prec.mod14$aic;prec.mod15$aic;prec.mod16$aic;prec.mod17$aic;prec.mod19$aic;prec.mod20$aic;prec.mod21$aic;prec.mod22$aic;prec.mod23$aic;prec.mod24$aic;prec.mod25$aic;prec.mod26$aic;prec.mod27$aic;prec.mod28$aic;prec.mod29$aic;prec.mod30$aic
 
 
-preds <- lapply(vars, predict, prec.mod7, type = 'response') %>% brick
-levelplot(prec.obs - preds, at = seq(-150, 150, 20), par.settings = BuRdTheme())
+
+preds <- lapply(vars, predict, prec.mod27, type = 'response') %>% brick
+levelplot(prec.obs - preds, at = seq(-100, 100, 20), par.settings = BuRdTheme())
+levelplot((sum(prec.obs) - sum(preds))/sum(prec.obs), at = seq(-100, 100, 10), par.settings = BuRdTheme())
+levelplot((sum(prec.obs) - sum(preds)), at = seq(-200, 200, 20), par.settings = BuRdTheme())
+
+levelplot(brick(sum(prec.obs), sum(preds)))
+levelplot(preds)
+levelplot(precc + precl)
+levelplot(brick(precc[[7]], prec.obs[[7]]))
 ```
+
+Use geosphere to calculate air paths
+```{r}
+
+```
+
+```{r}
+
+```
+
