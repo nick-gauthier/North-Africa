@@ -50,10 +50,18 @@ dco <- elev %>%
   distance(doEdge = T) %>% # calculate the distances
   mask(elev) %>% # mask out ocean cells  
   `/`(1000) # convert to km
-aspect <- elev %>% terrain(opt='aspect', unit = 'degrees')
+aspect <- elev  %>% terrain(opt='aspect', unit = 'degrees') %>% projectRaster(crs = "+proj=lcc")
 
-slope <- elev1k %>% 
-  terrain(opt = 'slope', unit = 'degrees') %>% aggregate(fact = 10, fun = median) %>% mask(na.mask)
+slope <- elev1k %>%
+  terrain(opt = 'slope', unit = 'degrees') %>% 
+  aggregate(fact = 10, fun = median) %>% 
+  mask(na.mask) %>% 
+  projectRaster(crs = "+proj=lcc") 
+
+levelplot(brick(aspect,aspect1))
+
+rough <- terrain(elev, opt = 'roughness')
+
 
 u <- brick('~/Downloads/b40.20th.track1.1deg.005.cam2.h0.U.185001-200512-002.nc', level = 23) %>%
   .[[1212:1871]] %>%
@@ -76,43 +84,46 @@ v <- brick('~/Downloads/b40.20th.track1.1deg.005.cam2.h0.V.185001-200512-003.nc'
 streamplot(stack(u[[1]], v[[1]]), isField = 'dXY')
 streamplot(stack(u[[7]], v[[7]]), isField = 'dXY')
 
-
-dir <- (270 - atan2(v, u) * (180 / pi)) %% 360
-vel <- sqrt(u ^ 2 + v ^ 2)
+u.lcc <- u %>% projectRaster(crs = "+proj=lcc")
+v.lcc <- v %>% projectRaster(crs = "+proj=lcc")
+dir <- (270 - atan2(v.lcc, u.lcc) * (180 / pi)) %% 360
+#writeRaster(dir, 'dir.nc')
+vel <- sqrt(u.lcc ^ 2 + v.lcc ^ 2)
 
 delta <- abs(dir - aspect) # distance between wind angle and slope orientation
 values(delta) <- ifelse(values(delta) > 180, 360 - values(delta), values(delta))
-oro <- sin(slope * 2 * pi / 180) * cos(delta * pi / 180) * vel * .5
+oro <- (sin(slope * 2 * pi / 180) * cos(delta * pi / 180) * vel * .5) %>% projectRaster(elev)
+oro2 <- (sin(slope * 2 * pi / 180) * cos(delta * pi / 180)) %>% projectRaster(elev)
 
-levelplot(dir)
+levelplot(oro, par.settings = RdBuTheme())
+plot(slope)
+plot(oro, prec.res)
+levelplot(delta)
+levelplot()
 ```
 
 
 ```{r}
-test <- dir[[7]] %>% 
-  reclassify(c(0, 45, 128, 45, 90, 1, 90, 135, 2, 135, 180, 4, 180, 225, 8, 225, 270, 16, 270, 315, 32, 315, 360, 64)) %>%
-  flowPath(41900)
-  
-plot(elev) + lines(xyFromCell(elev, test))
-
-xyFromCell(elev, test) %>% length
 dir.discrete <- dir %>% 
   reclassify(c(0, 45, 128, 45, 90, 1, 90, 135, 2, 135, 180, 4, 180, 225, 8, 225, 270, 16, 270, 315, 32, 315, 360, 64))
 
-
-test2 <- mclapply(Which(elev, cells = T), function(x){
-    dir.discrete[[1]] %>%
+target.cells <- Which(elev, cells = T)
+aco <- prec.obs
+for(i in 1:12){
+  aco[[i]][target.cells] <- mclapply(target.cells, function(x){
+    dir.discrete[[i]] %>%
     flowPath(x) %>%
     xyFromCell(elev, .) %>%
     length
-}, mc.cores = 4)
-plot(test)
+}) %>% unlist
+}
+
+
+levelplot(1/aco*precc)
 ```
 
 ```{r}
 month <- prec.obs %>% setValues(c(as.factor(rep(1:12, each = ncell(elev)))))
-levelplot(month)
-
 lat <- elev %>%
      coordinates %>%
      .[,2] %>% 
