@@ -72,59 +72,71 @@ tpsInterp <- function(rast.brick){
     interpolate(target, tps)
   }) %>% unlist %>% brick
 }
-
 ```
 
-
-
+Now import and process GCM data from the CCSM4 Last Millennium extension.
 ```{r}
-prec.obs <- brick('Data/CHELSA/prec.nc') %>% crop(bbox) %>% mask(na.mask)
-tmp.obs <- brick('Data/CHELSA/temp.nc') %>% crop(bbox) %>% mask(na.mask)
-  plot(tmp.obs)
+getGCM <- function(x, level = 1){
+  brick(x, level = level) %>% 
+    .[[1213:1872]] %>%
+    rotate %>%
+    crop(bbox) %>%
+    tpsInterp %>%
+    stackApply(1:12, mean) %>%
+    crop(bbox) %>%
+    mask(na.mask)
+}
+```
 
+```{r warnings = F, cache = T}
+# Temperature
+trefht <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.TREFHT.185001-200512.nc') - 273.15
+levelplot(trefht)
+```
 
-trefht <- brick()
+```{r warnings = F, cache = T}
+# Precipitation
+precl <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.PRECL.185001-200512.nc') * 2629743830
+precc <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.PRECC.185001-200512.nc') * 2629743830
 
-u <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.U.185001-200512.nc', level = 23) %>%
-  .[[1212:1871]] %>%
-  rotate %>%
-  crop(bbox, snap = 'out') %>%
-  tpsInterp %>%
-  stackApply(1:12, mean) %>%
-  crop(bbox) %>%
-  mask(na.mask)
+#spline interpolation will result in some values very slightly less than 0, unrealistic for precipitation
+precl[precl[] < 0] <- 0 
+precc[precc[] < 0] <- 0
 
-v <- brick('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.V.185001-200512.nc', level = 23) %>%
-  .[[1212:1871]] %>%
-  rotate %>%
-  crop(bbox) %>%
-  tpsInterp %>%
-  stackApply(1:12, mean) %>%
-  crop(bbox) %>%
-  mask(na.mask)
+levelplot(precl)
+levelplot(precc)
+```
+
+```{r warnings = F, cache = T}
+# Wind at ~850 level
+u <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.U.185001-200512.nc', level = 23) %>% projectRaster(crs = "+proj=lcc")
+v <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.V.185001-200512.nc', level = 23) %>% projectRaster(crs = "+proj=lcc")
 
 streamplot(stack(u[[1]], v[[1]]), isField = 'dXY')
 streamplot(stack(u[[7]], v[[7]]), isField = 'dXY')
+```
 
-u.lcc <- u %>% projectRaster(crs = "+proj=lcc")
-v.lcc <- v %>% projectRaster(crs = "+proj=lcc")
-dir <- (270 - atan2(v.lcc, u.lcc) * (180 / pi)) %% 360
-#writeRaster(dir, 'dir.nc')
-vel <- sqrt(u.lcc ^ 2 + v.lcc ^ 2)
+Calculate hybrid wind/topographic derivatives.
+
+```{r}
+dir <- (270 - atan2(v, u) * (180 / pi)) %% 360
+levelplot(dir)
+
+vel <- sqrt(u ^ 2 + v^ 2)
+levelplot(vel)
 
 delta <- abs(dir - aspect) # distance between wind angle and slope orientation
 values(delta) <- ifelse(values(delta) > 180, 360 - values(delta), values(delta))
-oro <- (sin(slope * 2 * pi / 180) * cos(delta * pi / 180) * vel * .5) %>% projectRaster(elev)
-oro2 <- (sin(slope * 2 * pi / 180) * cos(delta * pi / 180)) %>% projectRaster(elev)
-
-levelplot(oro, par.settings = RdBuTheme())
-plot(slope)
-plot(oro, prec.res)
 levelplot(delta)
-levelplot()
+
+lift.angle <- (sin(slope * 2 * pi / 180) * cos(delta * pi / 180)) %>% projectRaster(elev)
+levelplot(lift.angle, par.settings = RdBuTheme())
+
+oro <- (sin(slope * 2 * pi / 180) * cos(delta * pi / 180) * vel * .5) %>% projectRaster(elev)
+levelplot(oro, par.settings = RdBuTheme())
 ```
 
-
+Air parcel paths.
 ```{r}
 dir.discrete <- dir %>% 
   reclassify(c(0, 45, 128, 45, 90, 1, 90, 135, 2, 135, 180, 4, 180, 225, 8, 225, 270, 16, 270, 315, 32, 315, 360, 64))
