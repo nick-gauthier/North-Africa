@@ -151,7 +151,7 @@ levelplot(oro, par.settings = RdBuTheme())
 ```
 
 Air parcel paths.
-```{r}
+```{r, eval=FALSE, include=FALSE}
 dir.discrete <- dir %>% 
   reclassify(c(0, 45, 128, 45, 90, 1, 90, 135, 2, 135, 180, 4, 180, 225, 8, 225, 270, 16, 270, 315, 32, 315, 360, 64))
 
@@ -192,7 +192,8 @@ vars <- sapply(1:12, function(x){
 })
 
 dat <- lapply(vars, as.data.frame, na.rm = T) %>% 
-  do.call(rbind, .)
+  do.call(rbind, .) %>%
+  mutate(prec.occur = prec.obs > 0)
 ```
 
 ## Temperature model
@@ -216,9 +217,10 @@ First fit a model with just temperature from the GCM, and then one with temperat
 ```{r}
 temp.mod1 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10), data = dat)
 summary(temp.mod1)
+temp.mod1$aic
 plot(temp.mod1)
 ```
-Pretty good, 73% deviance explained and AIC of 1875984.
+Pretty good, 92% deviance explained and AIC of 1473361
 
 Elevation seems to explain most of the variance in the residuals.
 ```{r}
@@ -235,28 +237,38 @@ summary(temp.mod2)
 plot(temp.mod2)
 temp.mod2$aic
 ```
-Better aic (1836350), but not by much. Try seasonal variability.
+```{r}
+ggplot(dat, aes(elev, temp.mod2$residuals))   +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+
+Better aic (1345355). Try seasonal variability.
 ```{r}
 temp.mod3 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    te(elev, month, bs = c('cr', 'cc'), k = c(10, 12)), data = dat, knots = list(month = c(0.5, seq(1, 12, length = 10), 12.5)))
 summary(temp.mod3)
+temp.mod3$aic
 plot(temp.mod3, pers = T)
 ```
-Thats much better, 94.7% deviance explained and 1347038 aic. The tensor product smooth between month and elevation leads to increasedlapse rates in the summer.
+A bit better, 95.4% deviance explained and 1301674 aic. The tensor product smooth between month and elevation leads to increased lapse rates in the summer, but not by much.
+Without knowing why the lapse rate is varying seasonally, its best to keep the fixed lapse rate to maintain robustness.
 
 Now let's plot the predictions of the three models, and compare them to observations.
 
 ```{r}
-temp.preds <- lapply(vars, predict, temp.mod3) %>% brick
+temp.preds2 <- lapply(vars, predict, temp.mod2) %>% brick
+temp.preds3 <- lapply(vars, predict, temp.mod3) %>% brick
 
-levelplot(temp.obs - temp.preds, par.settings = RdBuTheme(), at = seq(-11, 11, 1))
+levelplot(brick(c(temp.obs - temp.preds2, temp.obs - temp.preds3)), par.settings = RdBuTheme(), at = seq(-11, 11, 1))
 ``` 
 
 Let's add in distance from the ocean.
 ```{r}
 temp.mod4 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    s(dco, bs ='cr', k = 10) +
-                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+                   s(elev, bs = 'cr', k = 10), data = dat, select = T)
 summary(temp.mod4)
 temp.mod4$aic
 plot(temp.mod4, pers = T)
@@ -267,7 +279,7 @@ temp.preds <- lapply(vars, predict, temp.mod4) %>% brick
 levelplot(temp.obs - temp.preds, par.settings = RdBuTheme(), at = seq(-10, 10, 1))
 ``` 
 
-Elevation looks fine.
+Elevation looks fine, although we can still see some seasonal signal in the residuals, its not that much.
 ```{r}
 ggplot(dat, aes(elev, temp.mod4$residuals))  +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
@@ -281,20 +293,28 @@ ggplot(dat, aes(trefht, temp.mod4$residuals))  +
   geom_smooth() +
   theme_minimal()
 ```
-There does seem to be some seasonal signal in the residuals against dco, perhaps seasonally varying dco as well?
+
 ```{r}
 ggplot(dat, aes(dco, temp.mod4$residuals))  +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
   geom_smooth() +
   theme_minimal()
 ```
+What about a seasonally varying dco?
 ```{r}
 temp.mod5 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
-                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+                   s(elev, bs = 'cr', k = 10), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
 summary(temp.mod5)
 temp.mod5$aic
 plot(temp.mod5, pers = T)
+```
+Try incorporating slope and aspect.
+```{r}
+ggplot(dat, aes(aspect, temp.mod5$residuals))  +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
 ```
 
 ```{r}
@@ -303,54 +323,156 @@ ggplot(dat, aes(slope, temp.mod5$residuals))  +
   geom_smooth() +
   theme_minimal()
 ```
-Try incorporating slope and aspect.
 ```{r}
 temp.mod6 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   s(slope, bs = 'cr', k = 10) +
+                   te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                   te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+temp.mod7 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    s(slope, bs = 'cr', k = 10) +
                    s(aspect, bs = 'cc', k = 10) +
                    ti(slope, aspect, bs = c('cr','cc')) +
                    te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
                    te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
-temp.mod7 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+temp.mod8 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    te(slope, aspect, bs = c('cr','cc')) +
                    te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
                    te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
-temp.mod8 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+temp.mod9 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    s(slope, bs = 'cr', k = 10) +
                    ti(slope, aspect, bs = c('cr','cc')) +
                    te(dco, month, bs = c('cr', 'cc'), k = c(10, 5)) +
                    te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
 
-temp.mod6$aic;temp.mod7$aic;temp.mod8$aic
-plot(temp.mod7, pers = T)
+temp.mod6$aic;temp.mod7$aic;temp.mod8$aic;temp.mod9$aic
+plot(temp.mod8, pers = T)
 ``` 
-Model7, with a tensor smooth of slope andaspect (rather than more complex interactions) seems like the best bet (low aic but still interpretable).
-
+Model8, with a tensor smooth of slope andaspect (rather than more complex interactions) seems like the best bet (low aic but still interpretable). We still have a question of whether we want the seasonal interactions. Let's compare those maps.
 ```{r}
-temp.preds <- lapply(vars, predict, temp.mod6) %>% brick
-levelplot(temp.obs - temp.preds, par.settings = RdBuTheme(), at = seq(-7, 7, .7))
-levelplot(brick(temp.preds[[1]], temp.obs[[1]], temp.preds[[7]], temp.obs[[7]]))
+temp.mod10 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
+                   te(slope, aspect, bs = c('cr','cc')) +
+                   s(dco, bs = 'cr', k = 10) +
+                   s(elev, bs = 'cr', k = 10), data = dat, select = T)
+temp.mod8$aic;temp.mod10$aic
 ```
 
-Its official, let's use temp.mod6 as the official model.
 ```{r}
-temp.mod <- temp.mod6
-saveRDS(temp.mod, 'temp_mod')
+temp.preds1 <- lapply(vars, predict, temp.mod8) %>% brick
+temp.preds2 <- lapply(vars, predict, temp.mod10) %>% brick
+levelplot(temp.preds2 - temp.preds1, par.settings = RdBuTheme(), at = seq(-4, 4, .4))
+levelplot(brick(temp.preds1[[1]], temp.preds2[[1]], temp.obs[[1]], temp.preds1[[7]], temp.preds[[7]],temp.obs[[7]]))
+levelplot(brick(temp.preds1[[1]] - temp.obs[[1]], temp.preds2[[1]] - temp.obs[[1]], temp.preds1[[7]] - temp.obs[[7]], temp.preds[[7]] - temp.obs[[7]]), par.settings= RdBuTheme(), at = seq(-6,6,.6))
 ```
+From the above plots, it looks like the seasonally varying model has slightly lower residuals, especially inland.
 
-little experiment with anomaly-based regression.
+ alittle experiment with anomalies. From these we can see that there is no seasonally varying signal of topography in the observed dataset,if we subtract out the mean from the observations we get a series of anomalies almostidentical to the anomalies from the GCM. Lets stick with the nonseasonally varying GAM then.
 
 ```{r}
-levelplot(temp.obs - mean(temp.obs))
+levelplot(temp.obs - mean(temp.obs), par.settings = RdBuTheme())
 levelplot(mean(temp.obs))
 
 plot(mean(temp.obs), elev)
 plot(mean(temp.obs), dco)
 plot(mean(temp.obs), projectRaster(slope, elev))
 plot(mean(temp.obs), mean(trefht))
-levelplot(brick(c(temp.obs - mean(temp.obs), trefht - mean(trefht))))
+levelplot(brick(c(temp.obs - mean(temp.obs), trefht - mean(trefht))), layout = c(12,2))
+```
+Its official, let's use temp.mod10 as the final model.
+```{r}
+temp.mod <- temp.mod10
+temp.pred <- lapply(vars, predict, temp.mod) %>% brick
+saveRDS(temp.mod, 'temp_mod')
 ```
 
+Add the predicted temperatures to the dataframe to use as temperature predictors for the precipitation models.
+```{r}
+vars <- sapply(1:12, function(x){
+  brick(temp.obs[[x]], prec.obs[[x]], trefht[[x]], precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
+        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], lift.angle[[x]], aco[[x]], dco, rough, elev, slope%>% projectRaster(elev), aspect %>% projectRaster(elev), lat, lon, month[[x]], temp.pred[[x]]) %>%
+    setNames(c('temp.obs', 'prec.obs', 'trefht', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'lift.angle', 'aco', 'dco', 'rough', 'elev', 'slope', 'aspect', 'lat', 'lon', 'month', 'temp'))
+})
+dat <- dat %>% mutate(temp = temp.mod$fitted.values)
+```
+
+
+
+## Precipitation
+### Occurrence
+First lets fit a model for precipitation occurrence using only precipitation data from the GCM.
+```{r}
+ggplot(dat, aes(prec.occur, trefht))  +
+  geom_boxplot() +
+  theme_minimal()
+
+ggplot(dat, aes(prec.occur, precl + precc))  +
+  geom_boxplot() +
+  theme_minimal()
+```
+
+```{r}
+occur.mod1 <- bam(prec.occur ~ s(precl, bs = 'cr', k = 10),
+                   family = binomial, data = dat, select = T)
+occur.mod2 <- bam(prec.occur ~ s(precc, bs = 'cr', k = 10), 
+                   family = binomial, data = dat, select = T)
+occur.mod3 <- bam(prec.occur ~ s(precl, bs = 'cr', k = 10) +
+                    s(precc, bs = 'cr', k = 10), 
+                   family = binomial, data = dat, select = T)
+occur.mod4 <- bam(prec.occur ~ s(precl + precc, bs = 'cr', k = 10), 
+                   family = binomial, data = dat, select = T)
+occur.mod5 <- bam(prec.occur ~ te(precl, precc), 
+                   family = binomial, data = dat, select = T)
+occur.mod1$aic;occur.mod2$aic;occur.mod3$aic;occur.mod4$aic;occur.mod5$aic
+```
+From above it looks like a simple additive structure works bestfor occurrence. What about temperature?
+```{r}
+occur.mod6 <- bam(prec.occur ~ s(temp, bs = 'cr', k = 10),
+                   family = binomial, data = dat, select = T)
+occur.mod7 <- bam(prec.occur ~ s(precl, bs = 'cr', k = 10) +
+                    s(precc, bs = 'cr', k = 10) +
+                    s(temp, bs = 'cr', k = 10), 
+                   family = binomial, data = dat, select = T)
+occur.mod8 <- bam(prec.occur ~ te(precl, temp), 
+                   family = binomial, data = dat, select = T)
+occur.mod3$aic;occur.mod6$aic;occur.mod7$aic;occur.mod8$aic
+```
+Temperature and precipitation from the model work welltogether, again best performing with a simple additive structure.
+The model compares well to observations, with an appropriate probabilitycutoff at about 0.3.
+```{r}
+summary(occur.mod7)
+plot(occur.mod7)
+occur.preds <- lapply(vars, predict, occur.mod7, type = 'response') %>% brick
+levelplot(brick(c(occur.preds > .3, prec.obs > 0)), layout = c(12,2))
+```
+Make mod7 the official occurrence model.
+```{r}
+occur.mod <- occur.mod7
+saveRDS(occur.mod, 'occur_mod')
+```
+
+
+### Amounts
+Now fit a model to the abundance of rainfall, conditional on its occurrence.
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(precl, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(precl, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
+```{r}
+ggplot(prec.dat, aes(precc, prec.obs)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth() +
+  facet_wrap(~as.factor(month)) +
+  theme_minimal()
+```
 ```{r}
 prec.mod <- bam(prec.obs ~ s(precc, bs = 'cr') +
                   s(precl, bs = 'cr'),
@@ -458,20 +580,7 @@ ggplot(prec.dat, aes(lon, prec.obs)) +
   facet_wrap(~as.factor(month)) +
   theme_minimal()
 ```
-```{r}
-ggplot(prec.dat, aes(precl, prec.obs)) +
-  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
-  facet_wrap(~as.factor(month)) +
-  theme_minimal()
-```
-```{r}
-ggplot(prec.dat, aes(precc, prec.obs)) +
-  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
-  facet_wrap(~as.factor(month)) +
-  theme_minimal()
-```
+
 ```{r}
 ggplot(prec.dat, aes(as.factor(month))) +
   geom_bar(aes(weight = prec.obs, fill = ..count..)) +
