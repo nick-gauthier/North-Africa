@@ -152,9 +152,54 @@ levelplot(oro, par.settings = RdBuTheme())
 
 Air parcel paths.
 ```{r, eval=FALSE, include=FALSE}
+
+library(RSAGA)
+#set environment for SAGA 
+myenv <- rsaga.env(modules='/usr/lib/x86_64-linux-gnu/saga/') 
+#output the DEM raster into a SAGA readable format 
+
+dir.to <- (90 - atan2(v, u) * (180 / pi)) %% 360
+
+writeRaster(elev, "elev.sgrd", format="SAGA", overwrite=TRUE) 
+flow.height <- projectRaster(u, elev)
+wind.effect <- projectRaster(u, elev)
+for(i in 1:12){
+  writeRaster(projectRaster(dir.to[[i]], elev), "dir.sgrd", format="SAGA", overwrite=TRUE) 
+  writeRaster(projectRaster(vel[[i]], elev), "vel.sgrd", format="SAGA", overwrite=TRUE)
+  rsaga.geoprocessor("ta_morphometry", module = 15, param = list(DEM="elev.sgrd",DIR="dir.sgrd",DIR_UNITS='1',LEN="vel.sgrd",LEN_SCALE=1, EFFECT="oro", AFH='flowheight', MAXDIST=300.0),env=myenv) 
+  flow.height[[i]] <- raster('flowheight.sgrd', native = T)
+  wind.effect[[i]] <- raster('oro.sgrd', native = T)
+}
+ 
+wind.effect <- wind.effect %>% mask(na.mask)
+flow.height <- flow.height %>% mask(na.mask)
+levelplot(log(flow.height))
+levelplot(wind.effect)
+```
+```{r}
+altDiff <- function(x){x[2] - x[1]}
+hd <- transition(elev, altDiff, 8, symm=FALSE)
+slope <- geoCorrection(hd)
+adj <- adjacent(elev, cells=1:ncell(elev), pairs=TRUE, directions=8)
+speed <- slope
+speed[adj] <- 6 * exp(-3.5 * abs(slope[adj] + 0.05))
+
+library(rWind)
+edit(flow.dispersion)
+plot(dir[[1]])
+ dir[[1]][]
+ vel[[1]][is.na(vel[])] <- 0
+plot(vel[[1]])
+flow <- flow.dispersion(dir[[1]], vel[[1]], 'active')
+
+transitionMatrix(Conductance)
+image(transitionMatrix(Conductance))
+```
+
+```{r}
 dir.discrete <- dir %>% 
   reclassify(c(0, 45, 128, 45, 90, 1, 90, 135, 2, 135, 180, 4, 180, 225, 8, 225, 270, 16, 270, 315, 32, 315, 360, 64))
-
+dir
 target.cells <- Which(elev, cells = T)
 aco <- prec.obs
 for(i in 1:12){
@@ -165,7 +210,7 @@ for(i in 1:12){
     length
 }) %>% unlist
 }
-
+ rsaga.get.libraries(path = myenv$modules)
 ```
 
 Auxiliary variables.
@@ -353,6 +398,7 @@ temp.mod10 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    te(slope, aspect, bs = c('cr','cc')) +
                    s(dco, bs = 'cr', k = 10) +
                    s(elev, bs = 'cr', k = 10), data = dat, select = T)
+plot(temp.mod10, pers = T)
 temp.mod8$aic;temp.mod10$aic
 ```
 
@@ -482,12 +528,12 @@ prec.mod2 <- bam(prec.obs ~ s(precc, bs = 'cr', k = 10) +
 prec.mod3 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
                   s(precl, bs = 'cr', k = 10),
                 data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
-prec.mod4 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
-                    te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
-                   s(elev, bs = 'cr', k = 10) +
-                    s(vel, bs = 'cr', k = 10) +
-                    te(rough, dco),
-                data = prec.dat, family = Gamma(link = 'log'), knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)), select = T)
+
+prec.mod4 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                  s(precl, bs = 'cr', k = 10) +
+                   te(vel, delta),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+
 prec.mod1$aic;prec.mod2$aic;prec.mod3$aic;prec.mod4$aic
 
 plot(prec.mod4, pers = T, pages = 1)
@@ -500,10 +546,10 @@ prec.obs %>%
   `-`(lapply(vars, predict, prec.mod3, type = 'response') %>% brick) %>% 
   levelplot(par.settings = RdBuTheme(), at = seq(-100,100,10)) 
 ```
-
+Should we useelevation or rtemperatureas a predictor
 ```{r}
 dat %>% filter(prec.obs > 0) %>%
-ggplot(aes(elev, prec.mod3$residuals)) +
+ggplot(aes(temp, prec.mod3$residuals)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
   geom_smooth(aes(color = as.factor(month))) +
   theme_minimal()
