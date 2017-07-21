@@ -136,7 +136,7 @@ Calculate hybrid wind/topographic derivatives.
 dir <- (270 - atan2(v, u) * (180 / pi)) %% 360
 levelplot(dir)
 
-vel <- sqrt(u ^ 2 + v^ 2)
+vel <- sqrt(u ^ 2 + v ^ 2)
 levelplot(vel)
 
 delta <- abs(dir - aspect) # distance between wind angle and slope orientation
@@ -250,7 +250,7 @@ temp.mod3 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    te(elev, month, bs = c('cr', 'cc'), k = c(10, 12)), data = dat, knots = list(month = c(0.5, seq(1, 12, length = 10), 12.5)))
 summary(temp.mod3)
 temp.mod3$aic
-plot(temp.mod3, pers = T)
+plot(temp.mod3, pers = T, pages = 1)
 ```
 A bit better, 95.4% deviance explained and 1301674 aic. The tensor product smooth between month and elevation leads to increased lapse rates in the summer, but not by much.
 Without knowing why the lapse rate is varying seasonally, its best to keep the fixed lapse rate to maintain robustness.
@@ -271,7 +271,7 @@ temp.mod4 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    s(elev, bs = 'cr', k = 10), data = dat, select = T)
 summary(temp.mod4)
 temp.mod4$aic
-plot(temp.mod4, pers = T)
+plot(temp.mod4, pers = T, pages = 1)
 ```
 Look at the residuals again
 ```{r}
@@ -307,7 +307,7 @@ temp.mod5 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    s(elev, bs = 'cr', k = 10), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
 summary(temp.mod5)
 temp.mod5$aic
-plot(temp.mod5, pers = T)
+plot(temp.mod5, pers = T, pages = 1)
 ```
 Try incorporating slope and aspect.
 ```{r}
@@ -345,7 +345,7 @@ temp.mod9 <- bam(temp.obs ~ s(trefht, bs = 'cr', k = 10) +
                    te(elev, month, bs = c('cr', 'cc'), k = c(10, 5)), data = dat, select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
 
 temp.mod6$aic;temp.mod7$aic;temp.mod8$aic;temp.mod9$aic
-plot(temp.mod8, pers = T)
+plot(temp.mod8, pers = T, pages = 1)
 ``` 
 Model8, with a tensor smooth of slope andaspect (rather than more complex interactions) seems like the best bet (low aic but still interpretable). We still have a question of whether we want the seasonal interactions. Let's compare those maps.
 ```{r}
@@ -423,7 +423,7 @@ occur.mod5 <- bam(prec.occur ~ te(precl, precc),
                    family = binomial, data = dat, select = T)
 occur.mod1$aic;occur.mod2$aic;occur.mod3$aic;occur.mod4$aic;occur.mod5$aic
 ```
-From above it looks like a simple additive structure works bestfor occurrence. What about temperature?
+From above it looks like a simple additive structure works best for occurrence. What about temperature?
 ```{r}
 occur.mod6 <- bam(prec.occur ~ s(temp, bs = 'cr', k = 10),
                    family = binomial, data = dat, select = T)
@@ -456,49 +456,72 @@ Now fit a model to the abundance of rainfall, conditional on its occurrence.
 dat %>% filter(prec.obs > 0) %>%
 ggplot(aes(precl, prec.obs)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
+  geom_smooth(aes(color = as.factor(month))) +
   theme_minimal()
 ```
+
+
+Looks safe to use a single precl. What's going on whith precc?
 ```{r}
-ggplot(prec.dat, aes(precl, prec.obs)) +
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(precc, prec.obs)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
-  facet_wrap(~as.factor(month)) +
+  geom_smooth(aes(color = as.factor(month))) +
   theme_minimal()
 ```
+
+Looks like there is seasonal patterning in precc, perhaps a seasonal bias in convective parameterizations?
+
+Fit three simple models using only the precipitaiton variables.
 ```{r}
-ggplot(prec.dat, aes(precc, prec.obs)) +
-  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
-  facet_wrap(~as.factor(month)) +
-  theme_minimal()
-```
-```{r}
-prec.mod <- bam(prec.obs ~ s(precc, bs = 'cr') +
-                  s(precl, bs = 'cr'),
-                data = prec.dat, family = Gamma(link = 'log'))
-prec.mod1 <- bam(prec.obs ~ s(precc, bs = 'cr', k = 10) +
+prec.mod1 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod2 <- bam(prec.obs ~ s(precc, bs = 'cr', k = 10) +
                   s(precl, bs = 'cr', k = 10),
-                data = prec.dat, family = Gamma(link = 'log'))
-prec.mod2 <- bam(prec.obs ~ s(log(precc), bs = 'cr', k = 10) +
-                  s(log(precl), bs = 'cr', k = 10),
-                data = prec.dat, family = Gamma(link = 'log'))
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod3 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                  s(precl, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+prec.mod4 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                    te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                   s(elev, bs = 'cr', k = 10) +
+                    s(vel, bs = 'cr', k = 10) +
+                    te(rough, dco),
+                data = prec.dat, family = Gamma(link = 'log'), knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)), select = T)
+prec.mod1$aic;prec.mod2$aic;prec.mod3$aic;prec.mod4$aic
+
+plot(prec.mod4, pers = T, pages = 1)
 ```
-Varying coefficient with elevation seasonally
+Seasonal interaction with precc is the best.
+Look at the residuals.
+
 ```{r}
-ggplot(prec.dat, aes(elev, prec.obs)) +
+prec.obs %>% 
+  `-`(lapply(vars, predict, prec.mod3, type = 'response') %>% brick) %>% 
+  levelplot(par.settings = RdBuTheme(), at = seq(-100,100,10)) 
+```
+
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(elev, prec.mod3$residuals)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
-  facet_wrap(~as.factor(month)) +
+  geom_smooth(aes(color = as.factor(month))) +
   theme_minimal()
 ```
 
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(delta, prec.mod3$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  theme_minimal()
+```
 
 ```{r}
-ggplot(prec.dat, aes(rough*(1/dco), prec.obs)) +
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(rough/max(rough) * vel/max(vel), prec.mod3$residuals)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
-  facet_wrap(~as.factor(month)) +
+  geom_smooth(aes(color = as.factor(month))) +
   theme_minimal()
 ```
 
@@ -573,26 +596,7 @@ ggplot(prec.dat, aes(lat, prec.obs)) +
   facet_wrap(~as.factor(month)) +
   theme_minimal()
 ```
-```{r}
-ggplot(prec.dat, aes(lon, prec.obs)) +
-  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
-  geom_smooth() +
-  facet_wrap(~as.factor(month)) +
-  theme_minimal()
-```
 
-```{r}
-ggplot(prec.dat, aes(as.factor(month))) +
-  geom_bar(aes(weight = prec.obs, fill = ..count..)) +
-  theme_minimal()
-```
-```{r}
-prec.dat %>% 
-  group_by(month) %>%
-  transmute(prc = mean(prec.obs)) %>%
-  ggplot(aes(month, prc))+
-  geom_line()
-```
 
 ```{r}
 prec.mod3 <- gam(prec.obs ~ s(precc, bs = 'cr') +
@@ -764,7 +768,7 @@ prec.mod30 <- bam(prec.obs ~
                    s(elev, bs = 'cr'),
                 data = prec.dat, family = Gamma(link = 'log'), knots = knots, method = 'REML', select = T)
 
-plot(prec.mod25, pers = T)
+plot(prec.mod25, pers = T, pages = 1)
 summary(prec.mod24)
 
 prec.mod22$residuals^2 %>% mean %>% sqrt
@@ -783,13 +787,3 @@ levelplot(preds)
 levelplot(precc + precl)
 levelplot(brick(precc[[7]], prec.obs[[7]]))
 ```
-
-Use geosphere to calculate air paths
-```{r}
-
-```
-
-```{r}
-
-```
-
