@@ -105,7 +105,13 @@ getGCM <- function(x, level = 1){
 ```{r warnings = F, cache = T}
 # Temperature
 trefht <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.TREFHT.185001-200512.nc') - 273.15
+qrefht <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.QREFHT.185001-200512.nc')
+rhrefht <- getGCM('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.RHREFHT.185001-200512.nc')
+
 levelplot(trefht)
+levelplot(qrefht)
+levelplot(rhrefht)
+plot(qrefht, prec.obs)
 ```
 
 ```{r warnings = F, cache = T}
@@ -155,27 +161,25 @@ Air parcel paths.
 
 library(RSAGA)
 #set environment for SAGA 
-myenv <- rsaga.env(modules='/usr/lib/x86_64-linux-gnu/saga/') 
 #output the DEM raster into a SAGA readable format 
 
 dir.to <- (90 - atan2(v, u) * (180 / pi)) %% 360
 
-writeRaster(elev, "elev.sgrd", format="SAGA", overwrite=TRUE) 
-flow.height <- projectRaster(u, elev)
-wind.effect <- projectRaster(u, elev)
+writeRaster(elev1k, "elev.sgrd", format="SAGA", overwrite=TRUE) 
+wind.effect <- projectRaster(u, elev1k)
 for(i in 1:12){
-  writeRaster(projectRaster(dir.to[[i]], elev), "dir.sgrd", format="SAGA", overwrite=TRUE) 
-  writeRaster(projectRaster(vel[[i]], elev), "vel.sgrd", format="SAGA", overwrite=TRUE)
-  rsaga.geoprocessor("ta_morphometry", module = 15, param = list(DEM="elev.sgrd",DIR="dir.sgrd",DIR_UNITS='1',LEN="vel.sgrd",LEN_SCALE=1, EFFECT="oro", AFH='flowheight', MAXDIST=300.0),env=myenv) 
-  flow.height[[i]] <- raster('flowheight.sgrd', native = T)
+  writeRaster(projectRaster(dir.to[[i]], elev1k), "dir.sgrd", format="SAGA", overwrite=TRUE) 
+  writeRaster(projectRaster(vel[[i]], elev1k), "vel.sgrd", format="SAGA", overwrite=TRUE)
+  rsaga.geoprocessor("ta_morphometry", module = 15, param = list(DEM="elev.sgrd",DIR="dir.sgrd",DIR_UNITS='1',LEN="vel.sgrd",LEN_SCALE=1, EFFECT="oro", AFH='flowheight', MAXDIST=300.0), check.module.exists = FALSE,warn=FALSE) 
   wind.effect[[i]] <- raster('oro.sgrd', native = T)
 }
- 
-wind.effect <- wind.effect %>% mask(na.mask)
-flow.height <- flow.height %>% mask(na.mask)
-levelplot(log(flow.height))
+
+
+wind.effect <- wind.effect %>% mask(elev1k) %>% resample(elev) %>% mask(na.mask)
+
 levelplot(wind.effect)
 ```
+
 ```{r}
 altDiff <- function(x){x[2] - x[1]}
 hd <- transition(elev, altDiff, 8, symm=FALSE)
@@ -210,7 +214,6 @@ for(i in 1:12){
     length
 }) %>% unlist
 }
- rsaga.get.libraries(path = myenv$modules)
 ```
 
 Auxiliary variables.
@@ -231,9 +234,9 @@ lon <- elev %>%
 ```{r}
 aco <- oro
 vars <- sapply(1:12, function(x){
-  brick(temp.obs[[x]], prec.obs[[x]], trefht[[x]], precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
-        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], lift.angle[[x]], aco[[x]], dco, rough, elev, slope%>% projectRaster(elev), aspect%>% projectRaster(elev), lat, lon, month[[x]]) %>%
-    setNames(c('temp.obs', 'prec.obs', 'trefht', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'lift.angle', 'aco', 'dco', 'rough', 'elev', 'slope', 'aspect', 'lat', 'lon', 'month'))
+  brick(temp.obs[[x]], prec.obs[[x]], trefht[[x]], rhrefht[[x]], qrefht[[x]], projectRaster(u[[x]],elev), projectRaster(v[[x]],elev), precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
+        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], lift.angle[[x]], aco[[x]], wind.effect[[x]], dco, rough, elev, slope %>% projectRaster(elev), aspect%>% projectRaster(elev), lat, lon, month[[x]]) %>%
+    setNames(c('temp.obs', 'prec.obs', 'trefht', 'rhrefht', 'qrefht', 'u', 'v', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'lift.angle', 'aco', 'wind.effect', 'dco', 'rough', 'elev', 'slope', 'aspect', 'lat', 'lon', 'month'))
 })
 
 dat <- lapply(vars, as.data.frame, na.rm = T) %>% 
@@ -433,9 +436,9 @@ saveRDS(temp.mod, 'temp_mod')
 Add the predicted temperatures to the dataframe to use as temperature predictors for the precipitation models.
 ```{r}
 vars <- sapply(1:12, function(x){
-  brick(temp.obs[[x]], prec.obs[[x]], trefht[[x]], precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
-        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], lift.angle[[x]], aco[[x]], dco, rough, elev, slope%>% projectRaster(elev), aspect %>% projectRaster(elev), lat, lon, month[[x]], temp.pred[[x]]) %>%
-    setNames(c('temp.obs', 'prec.obs', 'trefht', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'lift.angle', 'aco', 'dco', 'rough', 'elev', 'slope', 'aspect', 'lat', 'lon', 'month', 'temp'))
+  brick(temp.obs[[x]], prec.obs[[x]], trefht[[x]], rhrefht[[x]], qrefht[[x]], projectRaster(u[[x]],elev), projectRaster(v[[x]],elev), precc[[x]], precl[[x]], dir[[x]] %>% projectRaster(elev), 
+        vel[[x]] %>% projectRaster(elev), delta[[x]] %>% projectRaster(elev), oro[[x]], lift.angle[[x]], aco[[x]], wind.effect[[x]], dco, rough, elev, slope %>% projectRaster(elev), aspect%>% projectRaster(elev), lat, lon, month[[x]], temp.pred[[x]]) %>%
+    setNames(c('temp.obs', 'prec.obs', 'trefht', 'rhrefht', 'qrefht', 'u', 'v', 'precc', 'precl', 'dir', 'vel', 'delta', 'oro', 'lift.angle', 'aco', 'wind.effect', 'dco', 'rough', 'elev', 'slope', 'aspect', 'lat', 'lon', 'month', 'temp'))
 })
 dat <- dat %>% mutate(temp = temp.mod$fitted.values)
 ```
@@ -503,16 +506,18 @@ dat %>% filter(prec.obs > 0) %>%
 ggplot(aes(precl, prec.obs)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
   geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
   theme_minimal()
 ```
 
 
-Looks safe to use a single precl. What's going on whith precc?
+Looks safe to use a single precl. What's going on with precc?
 ```{r}
 dat %>% filter(prec.obs > 0) %>%
 ggplot(aes(precc, prec.obs)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
   geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
   theme_minimal()
 ```
 
@@ -529,27 +534,247 @@ prec.mod3 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
                   s(precl, bs = 'cr', k = 10),
                 data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
 
+
+prec.mod1$aic;prec.mod2$aic;prec.mod3$aic
+
+plot(prec.mod1, pers = T, pages = 0)
+```
+
+```{r}
+prec.obs %>% 
+  `-`(lapply(vars, predict, prec.mod1, type = 'response') %>% brick) %>% 
+  levelplot(par.settings = RdBuTheme(), at = seq(-100,100,10)) 
+```
+The seasonal effect for precc works well, but lets look at other alternatives as well.
+
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(precc, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+    geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
+  theme_minimal()
+```
+Let's set precc aside for now.
+No clear relationship to rh.
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(rhrefht, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
+  theme_minimal()
+```
+Nor for Q
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(qrefht, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
+  theme_minimal()
+```
+Should we include temperature or elevation?
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(temp, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+    geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
+  theme_minimal()
+```
+
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(elev, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
+  theme_minimal()
+```
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(wind.effect, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  geom_smooth() +
+  theme_minimal()
+```
+
+Lets fit different combinations of temp and elevation.
+
+```{r}
+prec.mod4 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(elev, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod5 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(temp, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod6 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(elev, bs = 'cr', k = 10) +
+                   s(temp, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod7 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(elev, bs = 'cr', k = 10) +
+                   s(temp, bs = 'cr', k = 10) +
+                   ti(elev,temp),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod8 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                   te(elev,temp),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+
+prec.mod4$aic;prec.mod5$aic;prec.mod6$aic;prec.mod7$aic;prec.mod8$aic
+plot(prec.mod4)
+plot(prec.mod5)
+plot(prec.mod6)
+plot(prec.mod7, pers = T)
+plot(prec.mod8, pers = T)
+
+
+summary(prec.mod4)
+```
+
+Check out wind effects.
+```{r}
+prec.mod9 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(wind.effect, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod10 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(wind.effect, bs = 'cr', k = 10) +
+                   ti(precl, wind.effect),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod11 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(dco, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod12 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(wind.effect, bs = 'cr', k = 10) +
+                  s(dco, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod13 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                  s(wind.effect, bs = 'cr', k = 10) +
+                  s(dco, bs = 'cr', k = 10) +
+                    ti(wind.effect, dco),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod14 <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                    te(wind.effect, dco),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+
+prec.mod9$aic;prec.mod10$aic;prec.mod11$aic;prec.mod12$aic;prec.mod13$aic;prec.mod14$aic
+plot(prec.mod9)
+plot(prec.mod14, pers = T)
+
+
+
+prec.mod.all <- bam(prec.obs ~ s(precl, bs = 'cr', k = 10) +
+                      s(precc, bs = 'cr', k = 10) +
+                    te(wind.effect, dco) +
+                      s(elev, bs = 'cr', k = 10) +
+                      s(temp, bs = 'cr', k = 10) +
+                      ti(elev, temp),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T)
+prec.mod.all$aic
+plot(prec.mod.all, pers = T)
+gam.check(prec.mod.all)
+```
+
+
+```{r}
+test <- brick(predict(vars[[1]], prec.mod4, type = 'response'),
+      predict(vars[[1]], prec.mod5, type = 'response'),
+      predict(vars[[1]], prec.mod6, type = 'response'),
+      predict(vars[[1]], prec.mod7, type = 'response'),
+      predict(vars[[1]], prec.mod8, type = 'response'),
+      predict(vars[[1]], prec.mod.all, type = 'response'),
+      prec.obs[[1]])
+levelplot(test)
+
+test <- brick(predict(vars[[7]], prec.mod4, type = 'response'),
+      predict(vars[[7]], prec.mod5, type = 'response'),
+      predict(vars[[7]], prec.mod6, type = 'response'),
+      predict(vars[[7]], prec.mod7, type = 'response'),
+      predict(vars[[7]], prec.mod8, type = 'response'),
+      predict(vars[[7]], prec.mod.all, type = 'response'),
+      prec.obs[[7]])
+levelplot(test)
+
+
+
+plot(brick(wind.effect[[1]], prec.obs[[1]]))
+```
+
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(flow.height, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  theme_minimal()
+```
+
+
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(precc, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  theme_minimal()
+```
+
+```{r}
+dat %>% filter(prec.obs > 0) %>%
+ggplot(aes(precc, prec.mod1$residuals)) +
+  geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
+  geom_smooth(aes(color = as.factor(month))) +
+  theme_minimal()
+```
+
+
+```{r}
 prec.mod4 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
                   s(precl, bs = 'cr', k = 10) +
-                   te(vel, delta),
+                  s(wind.effect, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+prec.mod5 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                  s(precl, bs = 'cr', k = 10) +
+                  te(wind.effect, rhrefht),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+prec.mod6 <- bam(prec.obs ~ s(precc, bs = 'cr', k = 10) +
+                  s(precl, bs = 'cr', k = 10) +
+                  te(wind.effect, rhrefht),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+prec.mod7 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                  s(precl, bs = 'cr', k = 10) +
+                  te(wind.effect, rhrefht),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+prec.mod8 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                  s(precl, bs = 'cr', k = 10) +
+                  te(wind.effect, rhrefht) +
+                   s(elev, bs = 'cr', k = 10),
                 data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
 
-prec.mod1$aic;prec.mod2$aic;prec.mod3$aic;prec.mod4$aic
+prec.mod9 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                  s(precl, bs = 'cr', k = 10) +
+                  te(wind.effect, rhrefht) +
+                   s(elev, bs = 'cr', k = 10) +
+                   s(temp, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
 
-plot(prec.mod4, pers = T, pages = 1)
+prec.mod10 <- bam(prec.obs ~ te(precc, month, bs = c('cr', 'cc'), k = c(10, 5)) +
+                  s(precl, bs = 'cr', k = 10) +
+                  te(wind.effect, dco) +
+                   s(elev, bs = 'cr', k = 10) +
+                   s(temp, bs = 'cr', k = 10),
+                data = filter(dat, prec.obs > 0), family = Gamma(link = 'log'), select = T, knots = list(month = c(0.5, seq(1, 12, length = 3), 12.5)))
+prec.mod4$aic.prec.mod5$aic;prec.mod6$aic;prec.mod7$aic;prec.mod8$aic;prec.mod9$aic;prec.mod10$aic
+
 ```
 Seasonal interaction with precc is the best.
 Look at the residuals.
 
-```{r}
-prec.obs %>% 
-  `-`(lapply(vars, predict, prec.mod3, type = 'response') %>% brick) %>% 
-  levelplot(par.settings = RdBuTheme(), at = seq(-100,100,10)) 
-```
+
 Should we useelevation or rtemperatureas a predictor
 ```{r}
 dat %>% filter(prec.obs > 0) %>%
-ggplot(aes(temp, prec.mod3$residuals)) +
+ggplot(aes(rhrefht, prec.mod1$residuals)) +
   geom_point(aes(color = as.factor(month)), alpha = .1, size = .3) +
   geom_smooth(aes(color = as.factor(month))) +
   theme_minimal()
