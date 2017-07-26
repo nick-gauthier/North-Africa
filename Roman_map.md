@@ -1,32 +1,94 @@
----
-title: "Mapping Roman North Africa"
-author: "Nick"
-date: "6/8/2017"
-output: 
-  html_document: 
-    keep_md: yes
----
+# Mapping Roman North Africa
+Nick  
+6/8/2017  
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-```{r}
+
+
+```r
 library(raster)
+```
+
+```
+## Loading required package: sp
+```
+
+```r
 library(rgdal)
+```
+
+```
+## rgdal: version: 1.2-7, (SVN revision 660)
+##  Geospatial Data Abstraction Library extensions to R successfully loaded
+##  Loaded GDAL runtime: GDAL 2.1.2, released 2016/10/24
+##  Path to GDAL shared files: /usr/share/gdal/2.1
+##  Loaded PROJ.4 runtime: Rel. 4.9.3, 15 August 2016, [PJ_VERSION: 493]
+##  Path to PROJ.4 shared files: (autodetected)
+##  Linking to sp version: 1.2-4
+```
+
+```r
 library(rasterVis)
+```
+
+```
+## Loading required package: lattice
+```
+
+```
+## Loading required package: latticeExtra
+```
+
+```
+## Loading required package: RColorBrewer
+```
+
+```r
 library(viridis)
+```
+
+```
+## Loading required package: viridisLite
+```
+
+```r
 library(tidyverse)
+```
+
+```
+## Loading tidyverse: ggplot2
+## Loading tidyverse: tibble
+## Loading tidyverse: tidyr
+## Loading tidyverse: readr
+## Loading tidyverse: purrr
+## Loading tidyverse: dplyr
+```
+
+```
+## Conflicts with tidy packages ----------------------------------------------
+```
+
+```
+## extract(): tidyr, raster
+## filter():  dplyr, stats
+## lag():     dplyr, stats
+## layer():   ggplot2, latticeExtra
+## select():  dplyr, raster
+```
+
+```r
 library(stringr)
 library(pleiades)
 ```
 
 Import SRTM basemap
-```{r}
+
+```r
 bbox <- extent(-10, 20, 28, 38)
 ```
 
 
-```{r}
+
+```r
 cities <- read.csv('NA_cities.csv') %>%
   group_by(BA_rank) %>% 
   mutate(size_est = ifelse(is.na(Size), mean(Size, na.rm=TRUE), Size)) %>%
@@ -36,17 +98,39 @@ roads <- readOGR('Data/Shapefiles/ba_roads.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
   crop(bbox) %>%
   fortify
+```
 
+```
+## OGR data source with driver: ESRI Shapefile 
+## Source: "Data/Shapefiles/ba_roads.shp", layer: "ba_roads"
+## with 3166 features
+## It has 25 fields
+```
+
+```
+## Warning in readOGR("Data/Shapefiles/ba_roads.shp"): Dropping null
+## geometries: 2221
+```
+
+```
+## Loading required namespace: rgeos
+```
+
+```r
 aqueducts <- readOGR('Data/Shapefiles/aqueducts.shp') %>%
-  spTransform(CRS('+proj=longlat')) %>%
-  crop(bbox)
-
-centuriation <- readOGR('Data/Shapefiles/centuriation_polygons.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
   crop(bbox)
 ```
 
-```{r}
+```
+## OGR data source with driver: ESRI Shapefile 
+## Source: "Data/Shapefiles/aqueducts.shp", layer: "aqueducts"
+## with 323 features
+## It has 21 fields
+```
+
+
+```r
 ggplot(cities, aes(lon, lat)) +
   geom_path(data = roads, aes(long, lat, group = group), alpha = .5) +
   geom_point(aes(color = pop_est, size = pop_est), alpha = .8) +
@@ -56,7 +140,10 @@ ggplot(cities, aes(lon, lat)) +
   coord_fixed()
 ```
 
-```{r}
+![](Roman_map_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
+
+
+```r
 with(cities, cities[rep(1:nrow(cities), pop_est),]) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -66,18 +153,12 @@ ggplot(aes(lon, lat)) +
   theme_void()
 ```
 
-```{r}
-with(cities, cities[rep(1:nrow(cities), pop_est),]) %>%
-ggplot(aes(lon, lat)) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
-  geom_path(data = centuriation, aes(long, lat, group = group), alpha = .5, color = 'white') +
-  scale_fill_viridis() +
-  coord_fixed() +
-  theme_void()
-```
+![](Roman_map_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
+
 
   
-```{r}
+
+```r
 places <- pl_search_places() %>%
   filter(locationPrecision == 'precise') %>%
   select(title, type = featureTypes, description, 
@@ -87,7 +168,28 @@ places <- pl_search_places() %>%
   collect  %>%
   filter(str_detect(periods, 'R')) %>%
   print
+```
 
+```
+## # A tibble: 3,068 x 10
+##                              title       type
+##                              <chr>      <chr>
+##  1              Cueva de la Paloma       mine
+##  2                           Ebura settlement
+##  3                      Eliocroca? settlement
+##  4 Roman Villa at El Faro (Torrox)      villa
+##  5              Ficariensis Locus? settlement
+##  6                       Fraxinum? settlement
+##  7           Fuente de las Piedras      villa
+##  8              Hoyo de la Campana       mine
+##  9                 Igabrum/Egabrum settlement
+## 10                        Iliberri settlement
+## # ... with 3,058 more rows, and 8 more variables: description <chr>,
+## #   lon <dbl>, lat <dbl>, periods <chr>, minDate <int>, maxDate <int>,
+## #   id <dbl>, tags <chr>
+```
+
+```r
 places %>% filter(str_detect(type, 'villa')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -95,7 +197,15 @@ ggplot(aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
+```
 
+```
+## Warning: call dbDisconnect() when finished working with a connection
+```
+
+![](Roman_map_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
+
+```r
 places %>% filter(str_detect(type, 'settlement')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -103,7 +213,11 @@ ggplot(aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
+```
 
+![](Roman_map_files/figure-html/unnamed-chunk-6-2.png)<!-- -->
+
+```r
 places %>% filter(str_detect(type, 'mine')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -111,7 +225,11 @@ ggplot(aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
+```
 
+![](Roman_map_files/figure-html/unnamed-chunk-6-3.png)<!-- -->
+
+```r
 places %>% filter(str_detect(type, 'spring')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -119,7 +237,11 @@ ggplot(aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
+```
 
+![](Roman_map_files/figure-html/unnamed-chunk-6-4.png)<!-- -->
+
+```r
 places %>% filter(str_detect(type, 'oasis')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -127,8 +249,11 @@ ggplot(aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
+```
 
+![](Roman_map_files/figure-html/unnamed-chunk-6-5.png)<!-- -->
 
+```r
 places %>% filter(str_detect(type, 'settlement')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -138,86 +263,32 @@ ggplot(aes(lon, lat)) +
   theme_void() +
   geom_point(data = cities, aes(lon, lat, size = pop_est), color = 'white') +
   scale_size_area()
-
 ```
+
+![](Roman_map_files/figure-html/unnamed-chunk-6-6.png)<!-- -->
 Compare to environmental covariates
-```{r, eval=FALSE, include=FALSE}
-srtm <- raster('Data/SRTM_NE_250m_TIF/SRTM_NE_250m.tif') %>%
-  crop(bbox)
-
-slope <- terrain(srtm, opt = 'slope', unit = 'degrees')
-aspect <- terrain(srtm, opt = 'aspect', unit = 'degrees')
-TPI <- terrain(srtm, opt = 'TPI')
-TRI <- terrain(srtm, opt = 'TRI')
-roughness <- terrain(srtm, opt = 'roughness')
-hill <- hillShade(slope, aspect, 40, 270)
-
-topo <- brick(c(srtm, slope, aspect, TPI, TRI, roughness))
-rm(srtm, slope, aspect, TPI, TRI, roughness)
-
-plot(slope<9)
-```
-
-```{r eval=FALSE, include=FALSE}
-prec <- brick('Data/CHELSA/prec.nc') %>% crop(bbox) %>% sum %>% resample(topo)
-levelplot(prec)
-
-env <- topo %>% raster::extract(cities[,8:9], df = T) %>% gather(key, value) %>% filter(key !='ID')
-
-ggplot(env, aes(x = key, y = value)) +
-  geom_boxplot()
-```
 
 
 
 
-```{r eval=FALSE, include=FALSE}
-library(gdistance)
 
-altDiff <- function(x){x[2] - x[1]}
-hd <- transition(srtm, altDiff, 8, symm=FALSE)
-adj <- adjacent(srtm, cells=1:ncell(srtm), pairs=TRUE, directions=8)
-```
+
+
+
 
 Create conductance matrix with geocorrection for lcps
-```{r lcp_conductance, eval=FALSE, include=FALSE}
-slope.c <- geoCorrection(hd, type = 'c')
-speed.c <- slope.c
-speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))
-Conductance.c <- geoCorrection(speed.c, type = 'c')
-rm(slope.c, speed.c)
-```
 
-```{r eval=FALSE, include=FALSE}
-sites <- major %>%
-  select(lon, lat) %>%
-  as.matrix
 
-acc <- accCost(Conductance.c, sites) %>%
-  mask(srtm)
 
-plot(acc/3600<3)
-```
 
 
 Create conductance matrix with geocorrection for random walks
-```{r randomwalk_conductance, eval=FALSE, include=FALSE}
-slope.r <- geoCorrection(hd, type = 'r', scl =T)
-speed.r <- slope.r
-speed.r[adj] <- 6 * exp(-3.5 * abs(slope.r[adj] + 0.05))
-Conductance.r <- geoCorrection(speed.r, type = 'r', scl = T)
-rm(slope.r, speed.r, hd, adj)
-```
 
 
-```{r, eval=FALSE, include=FALSE}
-pas <- passage(Conductance.r, sites, sites, theta = 1)
-plot(pas)
-```
 
-```{r, eval=FALSE, include=FALSE}
-plot(c(cost_matrix), c(commute_matrix))
-```
+
+
+
 
 
 
