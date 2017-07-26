@@ -1,0 +1,41 @@
+---
+title: "Agroecology_dyn"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Parameters
+```{r}
+calorie.req <- 202.5 #212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
+seed.req <- 135  #108 # kg of wheat to sow a hectare
+yield <- seed.req * 4   # kg of wheat yield per hectare, based on 4:1 yields
+#urb.rate <- .15
+
+land.req <- function(population, rent = .3){
+  produce <- yield - seed.req
+  hectares <- calorie.req * population / (produce * (1 - rent)) 
+  total.rent <- hectares * rent * produce
+  return(data_frame(hectares, total.rent))
+}
+land.req(6, 0)
+land.req(6)
+
+
+24000000 * 6.75 * .001
+800000 * calorie.req * 0.001
+land.req(160000)$total.rent  * 0.001
+```
+
+```{r}
+land.req.urb <- function(pop, rent = .3){
+  pop.req <- pop * calorie.req
+  produce <- yield - seed.req
+  hectares <- calorie.req * households * household.size / (produce * (1 - rent)) 
+  total.rent <- hectares * rent * produce
+  return(data_frame(hectares, total.rent))
+}
+```
+
