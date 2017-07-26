@@ -1,16 +1,143 @@
+breed [households household]
+households-own [grain-supply net-return occupants]
 
-
-
-
-
+patches-own [vegetation fertility seed farmstead state field owner fallow site]
+globals [grain-req seed-req max_veg fertility-loss-rate harvest-rate farm-rate max-fallow restore-rate]
 
 to setup
-  ask patches [set pcolor green]
+  clear-all
+  set grain-req 212
+  set max_veg 50
+  set-default-shape households "house"
+  set fertility-loss-rate .3
+  set harvest-rate .5
+  set farm-rate .1
+  set restore-rate .1
+  set max-fallow 2
+  set seed-req 135
+
+
+  setup-patches
+  setup-households
+
+  reset-ticks
+end
+
+to setup-patches
+  ask patches [
+    set vegetation 50
+    set pcolor 62
+    set field 0
+    set fertility 1
+    set owner -1
+    set fallow 0
+    set site FALSE
+    set farmstead 0
+    set seed 0
+  ]
 end
 
 
-to go
+to setup-households
+  create-households init-households [
+    set size 2
+    move-to one-of patches
+    let hh-num who
 
+    set occupants 6
+    set grain-supply 1000
+
+    ask patch-here [
+      set pcolor red
+      set farmstead farmstead + 1
+      set fertility 0
+    ]
+    ask other patches in-radius 5 with [owner = -1] [
+      set owner hh-num
+      set pcolor 74
+      set fallow 0
+    ]
+  ]
+end
+
+to go
+  if max-cycles > 0 and ticks >= max-cycles [ stop ]
+
+  ask households [
+    set size 1.5 * count households-on patch-here
+    choose-land
+    harvest
+    ;check-move
+  ]
+
+  regrow-patch
+  tick
+end
+
+to choose-land
+  let hh-num 0
+  set hh-num who
+  ifelse any? other (patches in-radius 5) with [fertility > 0 and (owner = hh-num or owner = -1)] [
+    let farm-patch (patches in-radius 5) with [owner = hh-num or owner = -1]
+
+      ask farm-patch [
+        set owner hh-num
+      ]
+      farm farm-patch
+      ][
+      ]
+end
+
+
+to sow [farmfield]
+  ask farmfield [set seed seed-req]
+end
+
+to harvest
+
+end
+
+
+to farm [farmfield]
+  let fval 1.0
+  ask farmfield [
+    if vegetation > 0 [set vegetation 0]
+    set fallow 0
+    set field 1
+    set pcolor 31
+    set fval fertility
+    if fertility > 0 [set fertility (fertility - fertility-loss-rate)]
+    if fertility < 0 [set fertility 0]
+    set pcolor 39.9 - (8.9 * fertility)
+  ]
+    set net-return ((harvest-rate) * fval) - (farm-rate)
+    ;set energy energy + net-return
+end
+
+
+to regrow-patch
+  ask patches [
+    set farmstead count households-here
+    ifelse fertility < 1
+      [set fertility fertility + restore-rate]
+      [set fertility 1]
+
+    if farmstead = 0 and not site and field = 0 [
+      if vegetation < 50 [
+        set vegetation vegetation + 1
+        set pcolor 59.9 - (vegetation * 7.9 / 50)
+      ]
+    ]
+
+    if owner != -1 and field = 0 [set fallow fallow + 1]
+
+    set field 0
+
+
+      if fallow > max-fallow and farmstead = 0 and not site [set owner -1]
+
+
+  ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -41,10 +168,10 @@ ticks
 30.0
 
 BUTTON
-50
-33
-123
-66
+7
+12
+80
+45
 NIL
 setup
 NIL
@@ -58,10 +185,10 @@ NIL
 1
 
 BUTTON
-75
-122
-138
-155
+83
+12
+146
+45
 NIL
 go
 T
@@ -75,10 +202,10 @@ NIL
 1
 
 BUTTON
-47
-200
-111
-233
+83
+48
+147
+81
 step
 go
 NIL
@@ -90,6 +217,51 @@ NIL
 NIL
 NIL
 1
+
+SLIDER
+15
+277
+187
+310
+init-households
+init-households
+0
+50
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+12
+319
+184
+352
+max-cycles
+max-cycles
+0
+1000
+1000.0
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+12
+363
+184
+396
+yield-ratio
+yield-ratio
+0
+10
+4.0
+1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -433,7 +605,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.0.1
+NetLogo 6.0
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
