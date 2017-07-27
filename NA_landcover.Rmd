@@ -13,6 +13,7 @@ library(rasterVis)
 library(tidyverse)
 library(mgcv)
 library(SPEI)
+library(fields)
 ```
 
 ```{r}
@@ -155,24 +156,30 @@ ggplot(lc_mh, aes(x, y)) +
 ## whats the difference between climate models
 ```{r}
 prec <- brick('Data/CHELSA/prec.nc') %>% crop(bbox)
+tmin <- brick('Data/CHELSA/tmin.nc') %>% crop(bbox)
+tmax <- brick('Data/CHELSA/tmax.nc') %>% crop(bbox)
 
 trace.prec <- (brick('~/gdrive/Projects/Neolithic Spread/trace.01-36.22000BP.cam2.PRECC.22000BP_decavgDJF_400BCE.nc') +
   brick('~/gdrive/Projects/Neolithic Spread/trace.01-36.22000BP.cam2.PRECL.22000BP_decavgDJF_400BCE.nc')) %>% 
   rotate %>%
-  crop(bbox) %>%
+  crop(bbox, snap = 'out') %>%
   resample(prec) %>%
-  mask(prec[[1]])
+  crop(bbox) %>%
+  mask(prec[[1]]) %>%
+  `*`(2.628e+9)
 
 ad200 <- mean(trace.prec[[2021:2026]])
 ad850 <- mean(trace.prec[[2090:2095]])
 ad1950 <- mean(trace.prec[[2199:2204]])
-ad1850 <- trace
+ad200[ad200[] < 0] <- 0
+ad850[ad850[] < 0] <- 0
+ad1950[ad1950[] < 0] <- 0
 
-plot(brick(c(ad1950, sum(prec[[c(12, 1, 2)]]))))
-
-brick(c(ad200 - ad1950, ad850 - ad1950, ad200 - ad850)) %>% levelplot
+levelplot(brick(c(ad1950, mean(prec[[c(12, 1, 2)]]))))
+brick(c((ad200 - ad1950)/ad1950, (ad850 - ad1950)/ad1950, (ad200 - ad850)/ad1950)) %>% levelplot(par.settings = RdBuTheme(), at = seq(-1,1,.2))
 # so it looks like the big change is from 200 to 850
 
+hist((ad200 - ad1950) / ad1950)
 
 lm.prec.present <- brick('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.PRECT.085001-185012.nc') %>%
   .[[12000:12012]] %>%
@@ -186,30 +193,59 @@ plot(brick(c(sum(lm.prec[[c(1,2,12)]]), trace.prec[[2189]] %>% resample(prec) %>
 ```
 
 ```{r}
-
 getLM <- function(x){
   brick(x) %>%
-  .[[1:60]] %>%
+  .[[1:600]] %>%
   rotate %>%
   crop(bbox) %>%
   resample(prec) %>%
-  mask(prec[[1]]) %>%
-  stackApply(1:12, mean)
+  stackApply(1:12, mean) %>%
+  mask(prec[[1]])
+}
+getHIST <- function(x){
+  brick(x) %>%
+  .[[1213:1812]] %>%
+  rotate %>%
+  crop(bbox) %>%
+  resample(prec) %>%
+  stackApply(1:12, mean) %>%
+  mask(prec[[1]])
 }
 
 lm.prec <- getLM('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.PRECT.085001-185012.nc') %>%
   `*`(2.628e+9)
+hist.prec <- getHIST('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.PRECT.185001-200512.nc') %>%
+  `*`(2.628e+9)
+levelplot((lm.prec - hist.prec)/hist.prec * 100)
+anom.prec <- prec + prec * ((lm.prec - hist.prec)/hist.prec)
+levelplot(brick(sum(prec), sum(anom.prec)))
+```
+
+```{r}
 
 lm.tmin <- getLM('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.TREFMNAV.085001-185012.nc') %>%
   `-`(273.15)
+hist.tmin <- getHIST('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.TREFMNAV.185001-200512.nc') %>%
+  `-`(273.15)
+levelplot(lm.tmin - hist.tmin)
+anom.tmin <- tmin + (lm.tmin - hist.tmin)
+levelplot(brick(mean(anom.tmin), mean(tmin)))
+
 
 lm.tmax <- getLM('~/gdrive/Data/b40.lm850-1850.1deg.001.cam2.h0.TREFMXAV.085001-185012.nc') %>%
   `-`(273.15)
+hist.tmax <- getHIST('~/Downloads/b40.lm1850-2005.1deg.002.cam2.h0.TREFMXAV.185001-200512.nc') %>%
+  `-`(273.15)
+levelplot(lm.tmax - hist.tmax)
+anom.tmax <- tmax + (lm.tmax - hist.tmax)
+levelplot(brick(mean(anom.tmax), mean(tmax)))
+```
 
-lm.pet <- hargreaves(lm.tmin %>% getValues %>% t, 
-                  lm.tmax %>% getValues %>% t, 
+```{r}
+lm.pet <- hargreaves(anom.tmin %>% getValues %>% t, 
+                  anom.tmax %>% getValues %>% t, 
                   Ra = srad %>% getValues %>% t, 
-                  Pre = lm.prec %>% getValues %>% t, na.rm = T) %>%
+                  Pre = anom.prec %>% getValues %>% t, na.rm = T) %>%
   t %>%
   setValues(lm.tmin, .)
 
@@ -221,14 +257,14 @@ for(a in 1:10){
     ksoil <- swc / 350
     lm.aet <- lm.pet[[i]] * ksoil
     aet.brick[[i]] <- lm.aet
-    swc.tmp <- swc + lm.prec[[i]] * (1 - .15) - lm.aet
+    swc.tmp <- swc + anom.prec[[i]] * (1 - .15) - lm.aet
     swc <- reclassify(swc.tmp, c(-Inf, 0, 0, 350, Inf, 350))
   }
 }
 
 alpha <- sum(aet.brick) / sum(lm.pet)
 
-lm.temp <- (lm.tmax + lm.tmin) / 2
+lm.temp <- (anom.tmax + anom.tmin) / 2
 t_warm <- max(lm.temp)
 t_cold <- min(lm.temp)
 
@@ -252,6 +288,7 @@ names(lm_predictors) <- c('t_warm', 't_cold', 'alpha', 'gdd5')
 rm(lm.prec, lm.tmin, lm.tmax, lm.pet, ksoil, lm.aet, aet.brick, swc.tmp, swc, lm.temp, t_warm, t_cold, alpha, gdd5)
 
 plot(lm_predictors)
+levelplot(brick(lm_predictors[[4]], modern_predictors[[4]]))
 ```
 
 ```{r}
@@ -285,6 +322,21 @@ ggplot(lc_lm, aes(x, y)) +
   scale_fill_manual(values = lc_colors) + 
   theme_void() + 
   coord_fixed()
+ggplot(lc_lm, aes(x, y)) + 
+  geom_tile(aes(fill = class)) + 
+  scale_fill_manual(values = lc_colors) + 
+  theme_void() + 
+  coord_fixed()
 
+ggplot(lc_mod, aes(x, y)) + 
+  geom_tile(aes(fill = class)) + 
+  scale_fill_manual(values = lc_colors) + 
+  theme_void() + 
+  coord_fixed()
 ```
+
+
+
+
+
 
