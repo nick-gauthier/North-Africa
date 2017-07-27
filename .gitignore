@@ -48,3 +48,7 @@ wc10/
 *.nc
 
 *.sgrd
+
+*.mgrd
+
+*.sdat

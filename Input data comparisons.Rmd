@@ -16,7 +16,6 @@ library(pbapply)
 
 ```{r}
 bbox <- extent(-10, 20, 28, 38)
-
 ```
 
 
