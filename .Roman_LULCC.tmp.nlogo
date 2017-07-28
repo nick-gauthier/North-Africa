@@ -65,16 +65,15 @@ end
 
 to go
   if max-cycles > 0 and ticks >= max-cycles [ stop ]
-
   ask households [
-    set size 1.5 * count households-on patch-here
-    if ticks != 0 [check-land]
-    choose-land
-    harvest
+  ;  set size 1.5 * count households-on patch-here
+   ; if ticks != 0 [check-land]
+    ;choose-land
+    ;harvest
     ;check-move
-  ]
+  ;]
 
-  regrow-patch
+ ; regrow-patch
   tick
 end
 
@@ -85,11 +84,9 @@ end
 to choose-land
   let hh-num 0
   set hh-num who
-  let xval 0
-  let yval 0
   ifelse any? other (patches in-radius 5) with [fertility > 0 and (owner = hh-num or owner = -1)] [
     let farm-fields n-of field-req (patches in-radius 5 with [owner = hh-num or owner = -1]
-      with-max [slope-val * ((fertility * soil-depth) / 2) - ((distancexy pxcor pycor) / 5)])
+      with-max [slope-val * ((fertility + 1 * soil-depth + 1) / 2) - ((distance myself) / 5)])
 
     ask farm-fields[
         set owner hh-num
