@@ -1,8 +1,8 @@
 breed [households household]
-households-own [grain-supply net-return occupants past-yield field-req]
+households-own [grain-supply net-return occupants]
 
-patches-own [slope-val soil-depth vegetation fertility seed farmstead state field owner fallow site]
-globals [init-yield seed-prop max_veg fertility-loss-rate harvest-rate farm-rate max-fallow restore-rate]
+patches-own [slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
+globals [init-yield max-yield seed-prop max_veg fertility-loss-rate harvest-rate farm-rate max-fallow restore-rate]
 
 to setup
   clear-all
@@ -14,7 +14,7 @@ to setup
   set restore-rate .1
   set max-fallow 2
   set seed-prop .1
-  set init-yield 400
+  set max-yield 1750
 
   setup-patches
   setup-households
@@ -34,7 +34,6 @@ to setup-patches
     set fallow 0
     set site FALSE
     set farmstead 0
-    set seed 0
   ]
 end
 
@@ -45,10 +44,9 @@ to setup-households
     move-to one-of patches
     let hh-num who
 
-    set past-yield 0
+    set net-return 400
     set occupants 6
-    set grain-supply 1000
-    set field-req ((occupants * grain-req) + (occupants * grain-req * seed)) / (init-yield * 1)
+    set grain-supply 0
 
     ask patch-here [
       set pcolor red
@@ -68,9 +66,8 @@ to go
 
   ask households [
     set size 1.5 * count households-on patch-here
-    if ticks != 0 [check-land]
     choose-land
-    harvest
+    eat
     ;check-move
   ]
 
@@ -78,49 +75,52 @@ to go
   tick
 end
 
-to check-land
-  set field-req ((occupants * grain-req) + (occupants * grain-req * seed)) / (past-yield * 1)
-end
 
 to choose-land
   let hh-num 0
   set hh-num who
-  let xval 0
-  let yval 0
-  ifelse any? other (patches in-radius 5) with [fertility > 0 and (owner = hh-num or owner = -1)] [
-    let farm-fields n-of field-req (patches in-radius 5 with [owner = hh-num or owner = -1]
-      with-max [slope-val * ((fertility * soil-depth) / 2) - ((distancexy pxcor pycor) / 5)])
+  let field-req ((occupants * grain-req) + (occupants * grain-req * seed-prop)) / (net-return * 1)
+  if any? other (patches in-radius 5) with [fertility > 0 and (owner = hh-num or owner = -1)] [
+    let farm-fields n-of field-req patches in-radius 5 with [(owner = hh-num or owner = -1)]
+      with-max [slope-val * ((fertility * soil-depth) / 2) - ((distance myself) / 5)])
 
     ask farm-fields[
         set owner hh-num
      ]
     farm farm-fields
   ]
-  [set grain-supply grain-supply - occupants * grain-req]
-
 end
 
 
 
-to harvest
+to eat
+  set grain-supply grain-supply - grain-req * occupants
+end
 
+to-report potential-yield [crop]
+  ifelse crop = "wheat"
+    [ report (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility)) + 1)) / 3 ]
+    [ report 0 ]
 end
 
 
 to farm [farmfield]
-  let fval 1.0
+  let patch-potential 1.0
+  let sval 1.0
   ask farmfield [
     if vegetation > 0 [set vegetation 0]
     set fallow 0
     set field 1
     set pcolor 31
-    set fval fertility
+    set patch-potential potential-yield "wheat"
+    set sval slope-val
     if fertility > 0 [set fertility (fertility - fertility-loss-rate)]
     if fertility < 0 [set fertility 0]
     set pcolor 39.9 - (8.9 * fertility)
   ]
-    set net-return ((harvest-rate) * fval) - (farm-rate)
-    ;set energy energy + net-return
+
+   set net-return (patch-potential * sval * max-yield) - (patch-potential * sval * max-yield) * seed-prop
+   set grain-supply grain-supply + net-return
 end
 
 
@@ -150,13 +150,13 @@ to regrow-patch
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-210
+290
 10
-647
-448
+893
+614
 -1
 -1
-13.0
+18.03030303030303
 1
 10
 1
@@ -285,6 +285,21 @@ grain-req
 1
 1
 kg/person
+HORIZONTAL
+
+SLIDER
+36
+451
+209
+484
+annual-precip
+annual-precip
+0
+1
+1.0
+1
+1
+m
 HORIZONTAL
 
 @#$#@#$#@
@@ -629,7 +644,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.0.1
+NetLogo 6.0
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
