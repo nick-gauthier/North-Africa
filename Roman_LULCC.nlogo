@@ -2,16 +2,14 @@ breed [households household]
 households-own [grain-supply avg-return occupants farmfields]
 
 patches-own [patch-yield slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
-globals [maxdist init-yield max-yield seed-prop max_veg fertility-loss-rate harvest-rate farm-rate max-fallow restore-rate]
+globals [maxdist init-yield max-yield seed-prop max_veg fertility-loss-rate max-fallow fertility-restore-rate]
 
 to setup
   clear-all
   set max_veg 50
   set-default-shape households "house"
-  set fertility-loss-rate .3
-  set harvest-rate .5
-  set farm-rate .1
-  set restore-rate .1
+  set fertility-loss-rate .1
+  set fertility-restore-rate .05
   set max-fallow 1000
   set seed-prop .1
   set max-yield 1750
@@ -126,12 +124,13 @@ to regrow-patch
   ask patches [
     set farmstead count households-here
     ifelse fertility < 1
-      [set fertility fertility + restore-rate]
+      [set fertility fertility + fertility-restore-rate]
       [set fertility 1]
 
     if farmstead = 0 and not site and field = 0 [
       if vegetation < 50 [
-        set vegetation vegetation + 1
+        let regrowth-rate (((-0.000118528 * fertility ^ 2) + (0.0215056 * fertility) + 0.0237987) + ((-0.000118528 * soil-depth ^ 2) + (0.0215056 * soil-depth) + 0.0237987)) / 2
+          set vegetation vegetation + regrowth-rate
         set pcolor 59.9 - (vegetation * 7.9 / 50)
       ]
     ]
@@ -149,11 +148,11 @@ end
 GRAPHICS-WINDOW
 290
 10
-893
-614
+793
+514
 -1
 -1
-18.03030303030303
+5.0
 1
 10
 1
@@ -163,10 +162,10 @@ GRAPHICS-WINDOW
 1
 1
 1
--16
-16
--16
-16
+-49
+49
+-49
+49
 0
 0
 1
@@ -233,7 +232,7 @@ init-households
 init-households
 0
 50
-4.0
+24.0
 1
 1
 NIL
