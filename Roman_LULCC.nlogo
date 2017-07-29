@@ -1,8 +1,8 @@
 breed [households household]
-households-own [grain-supply avg-return occupants]
+households-own [grain-supply avg-return occupants farmfields]
 
 patches-own [patch-yield slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
-globals [init-yield max-yield seed-prop max_veg fertility-loss-rate harvest-rate farm-rate max-fallow restore-rate]
+globals [maxdist init-yield max-yield seed-prop max_veg fertility-loss-rate harvest-rate farm-rate max-fallow restore-rate]
 
 to setup
   clear-all
@@ -12,9 +12,10 @@ to setup
   set harvest-rate .5
   set farm-rate .1
   set restore-rate .1
-  set max-fallow 2
+  set max-fallow 1000
   set seed-prop .1
   set max-yield 1750
+  set maxdist sqrt(max-pxcor ^ 2 + max-pycor ^ 2)
 
   setup-patches
   setup-households
@@ -30,7 +31,7 @@ to setup-patches
     set pcolor 62
     set field 0
     set fertility 1
-    set owner -1
+    set owner nobody
     set fallow 0
     set site FALSE
     set farmstead 0
@@ -42,60 +43,57 @@ end
 to setup-households
   create-households init-households [
     set size 2
-    move-to one-of patches
+    ;move-to one-of patches
     let hh-num who
 
     set avg-return 400
     set occupants 6
     set grain-supply 0
+    set farmfields no-patches
 
     ask patch-here [
       set pcolor red
+      set owner myself
       set farmstead farmstead + 1
       set fertility 0
-    ]
-    ask other patches in-radius 5 with [owner = -1] [
-      set owner hh-num
-      set pcolor 74
-      set fallow 0
     ]
   ]
 end
 
 to go
-  if max-cycles > 0 and ticks >= max-cycles [ stop ]
+  ;if max-cycles > 0 and ticks >= max-cycles [ stop ]
 
   ask households [
-    set size 1.5 * count households-on patch-here
-    choose-land
+    set size .5 * count households-on patch-here
+    check-land
+    farm
     eat
-    ;check-move
   ]
 
   regrow-patch
   tick
 end
 
-
-to choose-land
-  let hh-num 0
-  set hh-num who
+to check-land
   let field-req ceiling (((occupants * grain-req) + (occupants * grain-req * seed-prop)) / (avg-return * 1))
-  if any? other (patches in-radius 5) with [fertility > 0 and (owner = hh-num or owner = -1)] [
-    let farm-fields max-n-of field-req patches in-radius 5 with [(owner = hh-num or owner = -1)]
-       [slope-val * ((fertility * soil-depth) / 2) - ((distance myself) / 5)]
-
-    ask farm-fields[
-        set owner hh-num
-     ]
-    farm farm-fields
-  ]
+  if field-req > count farmfields and
+    any? other patches with [fertility > 0 and (owner = myself or owner = nobody)]
+  [ choose-land (field-req - count farmfields)]
 end
 
+to choose-land [num-fields]
+  let new-fields max-n-of num-fields patches with [owner = nobody] [farm-val]
+  ask new-fields [
+    set owner myself
+    if vegetation > 0 [set vegetation 0]
+    set field 1
+     set pcolor 31
+  ]
+  set farmfields (patch-set farmfields new-fields)
+end
 
-
-to eat
-  set grain-supply grain-supply - grain-req * occupants
+to-report farm-val
+  report (slope-val * ((fertility * soil-depth) / 2) - ((distance myself) / maxdist))
 end
 
 to-report yield [crop]
@@ -105,23 +103,24 @@ to-report yield [crop]
     [ report 0 ]
 end
 
-
-to farm [farmfields]
+to farm
   ask farmfields [
-    if vegetation > 0 [set vegetation 0]
     set fallow 0
-    set field 1
-    set pcolor 31
     set patch-yield yield "wheat"
     if fertility > 0 [set fertility (fertility - fertility-loss-rate)]
     if fertility < 0 [set fertility 0]
     set pcolor 39.9 - (8.9 * fertility)
   ]
 
-set avg-return mean [patch-yield - patch-yield * seed-prop] of farmfields
-   set grain-supply grain-supply + sum [patch-yield - patch-yield * seed-prop] of farmfields
+  set avg-return mean [patch-yield - patch-yield * seed-prop] of farmfields
+  set grain-supply grain-supply + sum [patch-yield - patch-yield * seed-prop] of farmfields
+
+  ask farmfields [ set patch-yield 0 ]
 end
 
+to eat
+  set grain-supply grain-supply - grain-req * occupants
+end
 
 to regrow-patch
   ask patches [
@@ -137,12 +136,11 @@ to regrow-patch
       ]
     ]
 
-    if owner != -1 and field = 0 [set fallow fallow + 1]
-
-    set field 0
+    if owner != nobody and field = 0 [set fallow fallow + 1]
 
 
-      if fallow > max-fallow and farmstead = 0 and not site [set owner -1]
+
+      if fallow > max-fallow and farmstead = 0 and not site [set owner nobody]
 
 
   ]
@@ -235,7 +233,7 @@ init-households
 init-households
 0
 50
-1.0
+4.0
 1
 1
 NIL
@@ -257,21 +255,6 @@ NIL
 HORIZONTAL
 
 SLIDER
-12
-363
-184
-396
-yield-ratio
-yield-ratio
-0
-10
-4.0
-1
-1
-NIL
-HORIZONTAL
-
-SLIDER
 4
 200
 204
@@ -287,16 +270,16 @@ kg/person
 HORIZONTAL
 
 SLIDER
-11
-401
-184
-434
+12
+360
+185
+393
 annual-precip
 annual-precip
-0
+.14
 1
-1.0
-1
+0.25
+.01
 1
 m
 HORIZONTAL
@@ -661,7 +644,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.0
+NetLogo 6.0.1
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
