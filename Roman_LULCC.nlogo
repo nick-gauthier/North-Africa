@@ -1,7 +1,7 @@
 breed [households household]
-households-own [grain-supply net-return occupants]
+households-own [grain-supply avg-return occupants]
 
-patches-own [slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
+patches-own [patch-yield slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
 globals [init-yield max-yield seed-prop max_veg fertility-loss-rate harvest-rate farm-rate max-fallow restore-rate]
 
 to setup
@@ -34,6 +34,7 @@ to setup-patches
     set fallow 0
     set site FALSE
     set farmstead 0
+    set patch-yield 0
   ]
 end
 
@@ -44,7 +45,7 @@ to setup-households
     move-to one-of patches
     let hh-num who
 
-    set net-return 400
+    set avg-return 400
     set occupants 6
     set grain-supply 0
 
@@ -79,10 +80,10 @@ end
 to choose-land
   let hh-num 0
   set hh-num who
-  let field-req ((occupants * grain-req) + (occupants * grain-req * seed-prop)) / (net-return * 1)
+  let field-req ceiling (((occupants * grain-req) + (occupants * grain-req * seed-prop)) / (avg-return * 1))
   if any? other (patches in-radius 5) with [fertility > 0 and (owner = hh-num or owner = -1)] [
-    let farm-fields n-of field-req patches in-radius 5 with [(owner = hh-num or owner = -1)]
-      with-max [slope-val * ((fertility * soil-depth) / 2) - ((distance myself) / 5)])
+    let farm-fields max-n-of field-req patches in-radius 5 with [(owner = hh-num or owner = -1)]
+       [slope-val * ((fertility * soil-depth) / 2) - ((distance myself) / 5)]
 
     ask farm-fields[
         set owner hh-num
@@ -97,30 +98,28 @@ to eat
   set grain-supply grain-supply - grain-req * occupants
 end
 
-to-report potential-yield [crop]
+to-report yield [crop]
   ifelse crop = "wheat"
-    [ report (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility)) + 1)) / 3 ]
+    [ let potential-yield (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility)) + 1)) / 3
+      report potential-yield * slope-val * max-yield ]
     [ report 0 ]
 end
 
 
-to farm [farmfield]
-  let patch-potential 1.0
-  let sval 1.0
-  ask farmfield [
+to farm [farmfields]
+  ask farmfields [
     if vegetation > 0 [set vegetation 0]
     set fallow 0
     set field 1
     set pcolor 31
-    set patch-potential potential-yield "wheat"
-    set sval slope-val
+    set patch-yield yield "wheat"
     if fertility > 0 [set fertility (fertility - fertility-loss-rate)]
     if fertility < 0 [set fertility 0]
     set pcolor 39.9 - (8.9 * fertility)
   ]
 
-   set net-return (patch-potential * sval * max-yield) - (patch-potential * sval * max-yield) * seed-prop
-   set grain-supply grain-supply + net-return
+set avg-return mean [patch-yield - patch-yield * seed-prop] of farmfields
+   set grain-supply grain-supply + sum [patch-yield - patch-yield * seed-prop] of farmfields
 end
 
 
@@ -288,10 +287,10 @@ kg/person
 HORIZONTAL
 
 SLIDER
-36
-451
-209
-484
+11
+401
+184
+434
 annual-precip
 annual-precip
 0
@@ -301,6 +300,24 @@ annual-precip
 1
 m
 HORIZONTAL
+
+PLOT
+87
+478
+287
+628
+plot 1
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot mean [grain-supply] of turtles"
 
 @#$#@#$#@
 ## WHAT IS IT?
