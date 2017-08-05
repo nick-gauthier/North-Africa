@@ -20,11 +20,37 @@ t_warm <- max(temp)
 t_cold <- min(temp)
 rm(temp)
 alpha <- raster('Data/CHELSA/alpha.nc')
-gdd0 <- raster('gdd0_global.tif')
-gdd5 <- raster('gdd5_global.tif')
+gdd0 <- raster('Data/gdd_global.tif')
+gdd5 <- raster('Data/gdd5_global.tif')
+```
+
+CLM-DVGM paramterizations
+```{r}
+tropical.evergreen <- (t_cold >= 15.5 & gdd5 >= 0)
+tropical.deciduous <- (t_cold >= 15.5 & gdd5 >= 0)
+temperate.needleleaf.evergreen <- (t_cold >= -2 & t_cold <=22 & gdd5 >= 900)
+temperate.broadleaf.evergreen <- (t_cold >= 3 & t_cold <= 18.8 & gdd5 >= 1200)
+temperate.broadleaf.deciduous <- (t_cold >= -17 & t_cold <= 15.5 & gdd5 >= 1200)
+boreal.needleleaf.evergreen <- (t_cold >= -32.5 & t_cold <= -2 & gdd5 >= 600)
+boreal.deciduous <- (t_cold <= -2 & gdd5 >= 350)
+temperate.broadleaf.deciduous.shrub <- (t_cold >= -17 & gdd5 >= 1200)
+boreal.broadleaf.deciduous.shrub <- (t_cold <= -2 & gdd5 >= 350)
+c4 <- (t_cold >= 15.5 & gdd5 >= 0)
+c3 <- (t_cold >= -17 & t_cold <= 15.5 & gdd5 >= 0)
+c3arctic <- (t_cold <= -17 & gdd5 >= 0)
+```
+
+```{r}
+potveg.clm <- brick(c(tropical.evergreen, tropical.deciduous, temperate.needleleaf.evergreen, temperate.broadleaf.evergreen, temperate.broadleaf.deciduous, boreal.needleleaf.evergreen, boreal.deciduous, temperate.broadleaf.deciduous.shrub, boreal.broadleaf.deciduous.shrub, c4, c3, c3arctic))
+
+rm(tropical.evergreen, tropical.deciduous, temperate.needleleaf.evergreen,
+temperate.broadleaf.evergreen, temperate.broadleaf.deciduous, boreal.needleleaf.evergreen, boreal.deciduous, temperate.broadleaf.deciduous.shrub, boreal.broadleaf.deciduous.shrub, c4, c3, c3arctic)
+
+levelplot(potveg.clm %>% crop(extent(-10, 20, 28, 38)))
 ```
 
 
+Prentice et al parameterizations
 ```{r}
 tropical.evergreen <- (t_cold >= 15.5 & alpha >= .8)
 tropical.raingreen <- (t_cold >= 15.5 & alpha >= .45 & alpha <= .95)
@@ -43,11 +69,11 @@ cold.desert.shrub <- (gdd0 >= 100)
 ```
 
 ```{r}
-potveg <- brick(c(tropical.evergreen, tropical.raingreen, warm.temperate.evergreen, temperate.summergreen, cool.temperate.conifer, boreal.evergreen.conifer, boreal.summergreen, succulent, warm.grass.shrub, cool.grass.shrub, cold.grass.shrub, hot.desert.shrub, cold.desert.shrub))
+potveg.prentice <- brick(c(tropical.evergreen, tropical.raingreen, warm.temperate.evergreen, temperate.summergreen, cool.temperate.conifer, boreal.evergreen.conifer, boreal.summergreen, succulent, warm.grass.shrub, cool.grass.shrub, cold.grass.shrub, hot.desert.shrub, cold.desert.shrub))
 
 rm(tropical.evergreen, tropical.raingreen, warm.temperate.evergreen, temperate.summergreen, cool.temperate.conifer, boreal.evergreen.conifer, boreal.summergreen, succulent, warm.grass.shrub, cool.grass.shrub, cold.grass.shrub, hot.desert.shrub, cold.desert.shrub)
 
-levelplot(potveg)
+levelplot(potveg.prentice %>% crop(extent(-10, 20, 28, 38)))
 ```
 
 
