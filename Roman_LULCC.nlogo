@@ -1,16 +1,13 @@
 breed [households household]
+breed [villages village]
 households-own [fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
-
-patches-own [patch-yield slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
+villages-own [settled-patches]
+patches-own [settlement patch-yield slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
 globals [wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-ha patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
 
 to setup
   clear-all
   set max-veg 50
-  set-default-shape households "house"
-  ;set fertility-loss-rate 1
-  ;set fertility-restore-rate .5
-  ;set max-fallow
   set seed-prop .15
   set max-capita-labor 250
   set patches-per-ha 4
@@ -23,7 +20,7 @@ to setup
   set starvation-threshold 0.6
   set wood-gather-intensity 0.08
   setup-patches
-  setup-households
+  setup-village
 
   reset-ticks
 end
@@ -40,29 +37,35 @@ to setup-patches
     ;set fallow 0
     set site FALSE
     set farmstead 0
+    set settlement 0
     set patch-yield 0
   ]
 end
 
 
-to setup-households
-  create-households init-households [
-    set size 2
-
-    set fuzzy-yield [yield "wheat"] of one-of patches in-radius 5 with [fertility > 0]
-    set occupants 6
-    set grain-supply occupants * grain-req
-    set farm-fields no-patches
-    set fed-prop 1
-
-    ask patch-here [
+to setup-village
+  create-villages 1 [
+   ht
+    hatch-households init-households [
+      set fuzzy-yield [yield "wheat"] of one-of patches in-radius 5 with [fertility > 0]
+      set occupants 6
+      set grain-supply occupants * grain-req
+      set farm-fields no-patches
+      set fed-prop 1
+      ht
+    ]
+    let settled-area max list 1 round(.1744 * (sum [occupants] of households-here) ^ .635 * patches-per-ha)
+    set settled-patches min-n-of settled-area patches [distance myself]
+    ask settled-patches [
       set pcolor red
       set owner myself
-      set farmstead farmstead + 1
-      set fertility 0
+      set settlement 1
+      set vegetation 0
+      set patch-yield 0
     ]
   ]
 end
+
 
 to go
   ;if max-cycles > 0 and ticks >= max-cycles [ stop ]
@@ -76,9 +79,7 @@ to go
     gather-wood
   ]
 
-  if dynamic-pop [
-    ask households [
-      birth-death]]
+  if dynamic-pop [birth-death]
 
 
   regrow-patch
@@ -112,6 +113,7 @@ to drop-farmland [num-fields]
     set owner nobody
     set patch-yield 0
     set field 0
+    set pcolor 59.9 - (vegetation * 7.9 / 50)
   ]
   set farm-fields farm-fields with [owner = myself]
 end
@@ -183,14 +185,50 @@ to gather-wood
 
 end
 
+
+to birth-death
+  ask households [
+   let deaths (random-poisson (death-rate * 100)) / 100 * occupants
+  let births ifelse-value (fed-prop >= starvation-threshold)
+[ (random-poisson (birth-rate * 100)) / 100 * occupants ]
+[ 0 ]
+
+  set occupants occupants + births - deaths
+
+  if occupants <= 0 [ die ]
+  ]
+
+  ask villages [
+    let settled-area max list 1 round(.1744 * (sum [occupants] of households-here) ^ .635 * patches-per-ha)
+    if settled-area != count settled-patches [adjust-settlement-size (settled-area - count settled-patches)]
+  ]
+
+end
+
+to adjust-settlement-size [patch-diff]
+  ifelse patch-diff > 0
+    [repeat patch-diff [
+      ask min-one-of patches with [any? neighbors4 with [settlement = 1]] [farm-val][
+        set owner myself
+        set pcolor red
+        set settlement 1
+        set field 0
+        set vegetation 0
+        set patch-yield 0]]]
+    [ask max-n-of abs(patch-diff) settled-patches [distance myself]
+     [set owner nobody
+      set settlement 0
+      set pcolor 59.9 - (vegetation * 7.9 / 50)]]
+  set settled-patches patches with [owner = myself]
+end
+
 to regrow-patch
   ask patches [
-    set farmstead count households-here
 
     if fertility < 100 [set fertility fertility + random-normal 2 .5 ]
     if fertility > 100 [set fertility 100]
 
-    if farmstead = 0 and not site and field = 0 [
+    if field = 0 and settlement = 0 [
       if vegetation < max-veg [
         let regrowth-rate (((-0.000118528 * fertility ^ 2) + (0.0215056 * fertility) + 0.0237987) + ((-0.000118528 * soil-depth ^ 2) + (0.0215056 * soil-depth) + 0.0237987)) / 2
         set vegetation vegetation + regrowth-rate
@@ -200,17 +238,6 @@ to regrow-patch
 
     ]
   ]
-end
-
-to birth-death
-   let deaths (random-poisson (death-rate * 100)) / 100 * occupants
-  let births ifelse-value (fed-prop >= starvation-threshold)
-[ (random-poisson (birth-rate * 100)) / 100 * occupants ]
-[ 0 ]
-
-  set occupants occupants + births - deaths
-
-  if occupants <= 0 [ die ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -350,7 +377,7 @@ NIL
 10.0
 true
 false
-"" "ask turtles [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks grain-supply\n]"
+"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks grain-supply\n]"
 PENS
 
 CHOOSER
@@ -361,7 +388,7 @@ CHOOSER
 tenure
 tenure
 "none" "satisficing" "maximizing"
-0
+1
 
 PLOT
 36
@@ -414,7 +441,7 @@ NIL
 10.0
 true
 false
-"" "ask turtles [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks occupants\n]"
+"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks occupants\n]"
 PENS
 
 SLIDER
@@ -439,7 +466,7 @@ SWITCH
 666
 dynamic-pop
 dynamic-pop
-1
+0
 1
 -1000
 
@@ -629,6 +656,27 @@ Rectangle -7500403 true true 45 120 255 285
 Rectangle -16777216 true false 120 210 180 285
 Polygon -7500403 true true 15 120 150 15 285 120
 Line -16777216 false 30 120 270 120
+
+house two story
+false
+0
+Polygon -7500403 true true 2 180 227 180 152 150 32 150
+Rectangle -7500403 true true 270 75 285 255
+Rectangle -7500403 true true 75 135 270 255
+Rectangle -16777216 true false 124 195 187 256
+Rectangle -16777216 true false 210 195 255 240
+Rectangle -16777216 true false 90 150 135 180
+Rectangle -16777216 true false 210 150 255 180
+Line -16777216 false 270 135 270 255
+Rectangle -7500403 true true 15 180 75 255
+Polygon -7500403 true true 60 135 285 135 240 90 105 90
+Line -16777216 false 75 135 75 180
+Rectangle -16777216 true false 30 195 93 240
+Line -16777216 false 60 135 285 135
+Line -16777216 false 255 105 285 135
+Line -16777216 false 0 180 75 180
+Line -7500403 true 60 195 60 240
+Line -7500403 true 154 195 154 255
 
 leaf
 false
