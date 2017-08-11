@@ -2,23 +2,26 @@ breed [households household]
 households-own [fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
 
 patches-own [patch-yield slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
-globals [starvation-threshold birth-rate death-rate patches-per-ha max-capita-labor maxdist init-yield max-yield seed-prop max_veg fertility-loss-rate max-fallow fertility-restore-rate]
+globals [wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-ha patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
 
 to setup
   clear-all
-  set max_veg 50
+  set max-veg 50
   set-default-shape households "house"
-  set fertility-loss-rate .1
-  set fertility-restore-rate .05
+  ;set fertility-loss-rate 1
+  ;set fertility-restore-rate .5
   ;set max-fallow
   set seed-prop .15
-  set maxdist sqrt(max-pxcor ^ 2 + max-pycor ^ 2)
   set max-capita-labor 250
   set patches-per-ha 4
+  set patches-per-m2 patches-per-ha / 10000
+  set max-farm-dist 96 * patches-per-ha * .5
+  set max-wood-dist 256 * patches-per-ha * .5
   set max-yield 3500 / patches-per-ha
   set birth-rate 0.054
   set death-rate 0.04
   set starvation-threshold 0.6
+  set wood-gather-intensity 0.08
   setup-patches
   setup-households
 
@@ -30,9 +33,9 @@ to setup-patches
     set slope-val 1
     set soil-depth 1
     set vegetation 50
-    set pcolor 62
+    set pcolor 52
     set field 0
-    set fertility 1
+    set fertility 100
     set owner nobody
     ;set fallow 0
     set site FALSE
@@ -45,7 +48,6 @@ end
 to setup-households
   create-households init-households [
     set size 2
-    ;move-to one-of patches
 
     set fuzzy-yield [yield "wheat"] of one-of patches in-radius 5 with [fertility > 0]
     set occupants 6
@@ -66,134 +68,159 @@ to go
   ;if max-cycles > 0 and ticks >= max-cycles [ stop ]
 
   ask households [
-    set size .5 * count households-on patch-here
-    check-land
+    check-farmland
   ]
 
   ask households [
     farm
-    ;birth-death
+    gather-wood
   ]
+
+  if dynamic-pop [
+    ask households [
+      birth-death]]
+
 
   regrow-patch
   tick
 end
 
-to check-land
-  let field-req ceiling (((occupants * grain-req) + (occupants * grain-req * seed-prop)) / fuzzy-yield)
-  set field-req field-req - floor (fuzzy-return / fuzzy-yield)
+to check-farmland
+  let field-req round ((occupants * grain-req * (1 + seed-prop)) / (fuzzy-yield * .95))
+  ;set field-req field-req - round (fuzzy-return / fuzzy-yield)
 
   let field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
   set field-req (min list field-req field-max)
   ifelse tenure = "none"
-  [ if count farm-fields > 0 [ drop-land (count farm-fields) ]
-    choose-land (field-req)]
+  [ if count farm-fields > 0 [ drop-farmland (count farm-fields) ]
+    choose-farmland (field-req)]
   [ if field-req < count farm-fields
-      [ drop-land (count farm-fields - field-req) ]
+      [ drop-farmland (count farm-fields - field-req) ]
     if field-req > count farm-fields and any? other patches with [fertility > 0 and owner = nobody]
-      [ choose-land (field-req - count farm-fields)]
+      [ choose-farmland (field-req - count farm-fields) ]
   ]
 end
 
-to drop-land [num-fields]
+to drop-farmland [num-fields]
  let mean-yield mean [patch-yield] of farm-fields
   let max-patch-yield max [patch-yield] of farm-fields
   let drop-fields ifelse-value (tenure = "maximizing")
-    [farm-fields with [patch-yield < (max-patch-yield - (max-patch-yield * tenure-drop))] ]
+    [farm-fields with [patch-yield < (max-patch-yield * (1 - tenure-drop))] ]
    [n-of num-fields farm-fields]
 
   ask drop-fields [
     set owner nobody
     set patch-yield 0
+    set field 0
   ]
   set farm-fields farm-fields with [owner = myself]
 end
 
-to choose-land [num-fields]
+to choose-farmland [num-fields]
   let new-fields max-n-of num-fields patches with [owner = nobody] [farm-val]
+  ;let patch-clear 0
   ask new-fields [
     set owner myself
+    set field 1
     set vegetation 5
   ]
+
+  ;set cleared-wood cleared-wood + patch-clear
   ;ask n-of (num-fields / 2) new-fields [ set fallow 1 ]
   set farm-fields (patch-set farm-fields new-fields)
 end
 
 to-report farm-val
-  report slope-val * (((fertility + 1) * (soil-depth + 1)) / 2) - ((distance myself) / maxdist)
+  let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100
+  report slope-val * (((fertility / 100 + 1) * (soil-depth + 1)) / 2) - (1 * (distance myself) / max-farm-dist + lcdeval)
 end
 
 to-report yield [crop]
   ifelse crop = "wheat"
-    [ let potential-yield (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility)) + 1)) / 3
+    [ let potential-yield (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility / 100)) + 1)) / 3
       report (potential-yield * slope-val * max-yield) / patches-per-ha ]
     [ report 0 ]
 end
 
 to farm
-  let farm-patches farm-fields ;with [fallow >= 1]
-  ask farm-patches [
+  ask farm-fields [
     set fallow 0
     set field 1
-    set vegetation 5
-    set pcolor 31
-    set patch-yield yield "wheat"
-    if fertility > 0 [set fertility (fertility - fertility-loss-rate)]
+
+    ifelse fertility > 0
+      [ set patch-yield yield "wheat"
+        set fertility (fertility - random-normal 3 2)]
+    [set patch-yield 0]
     if fertility < 0 [set fertility 0]
-    set pcolor 39.9 - (8.9 * fertility)
+    set pcolor 39.9 - (8.9 * fertility / 100)
    ]
 
-  let gross-return sum [patch-yield] of farm-patches * (1 - seed-prop)
-  set fed-prop gross-return / occupants
-  let net-return gross-return - (grain-req * occupants)
+  let gross-return sum [patch-yield] of farm-fields
+  set fed-prop gross-return * (1 - seed-prop) / (grain-req * occupants)
+  let net-return gross-return * (1 - seed-prop) - (grain-req * occupants)
+
   set grain-supply grain-supply + net-return
+  if grain-supply < 0 [ set grain-supply 0 ]
+
   set fuzzy-return random-normal net-return abs(net-return * .0333)
 
-  let mean-yield mean [patch-yield] of farm-patches
+  let mean-yield mean [patch-yield] of farm-fields
   set fuzzy-yield random-normal mean-yield (mean-yield * .0333)
 end
 
 
+to gather-wood
+  let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))
+  let wood-patches max-n-of num-patches patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - ((distance myself) / max-wood-dist)))) / (1 + 3) ]
+  ask wood-patches [
+      ifelse vegetation > 35
+      [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
+      [ ifelse vegetation > 18
+        [ set vegetation ((vegetation * .0047 + .5755) - wood-gather-intensity - .5755) / .0047 ]
+        [ set vegetation ((vegetation * .0509 - .2562) - wood-gather-intensity + .2562) / .0509 ]]
+      if vegetation < 0 [ set vegetation 0 ]
+  ]
+
+end
+
 to regrow-patch
   ask patches [
     set farmstead count households-here
-    ifelse fertility < 1
-      [set fertility fertility + fertility-restore-rate]
-      [set fertility 1]
+
+    if fertility < 100 [set fertility fertility + random-normal 2 .5 ]
+    if fertility > 100 [set fertility 100]
 
     if farmstead = 0 and not site and field = 0 [
-      if vegetation < 50 [
+      if vegetation < max-veg [
         let regrowth-rate (((-0.000118528 * fertility ^ 2) + (0.0215056 * fertility) + 0.0237987) + ((-0.000118528 * soil-depth ^ 2) + (0.0215056 * soil-depth) + 0.0237987)) / 2
-          set vegetation vegetation + regrowth-rate
+        set vegetation vegetation + regrowth-rate
+        if vegetation > max-veg [set vegetation max-veg]
         set pcolor 59.9 - (vegetation * 7.9 / 50)
       ]
+
     ]
-
-   if owner != nobody and field = 0 [set fallow fallow + 1]
-   set field 0
-
-
-     ; if fallow > max-fallow and farmstead = 0 and not site [set owner nobody]
-
-
   ]
 end
 
 to birth-death
-  ifelse fed-prop < starvation-threshold
-    [ set occupants occupants - (((random-poisson (death-rate * 100)) / 100) * occupants) ]
-    [ set occupants occupants + (((random-poisson (birth-rate * 100)) / 100) * occupants) - (((random-poisson (death-rate * 100)) / 100) * occupants) ]
+   let deaths (random-poisson (death-rate * 100)) / 100 * occupants
+  let births ifelse-value (fed-prop >= starvation-threshold)
+[ (random-poisson (birth-rate * 100)) / 100 * occupants ]
+[ 0 ]
+
+  set occupants occupants + births - deaths
+
   if occupants <= 0 [ die ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
 290
 10
-803
-524
+901
+622
 -1
 -1
-5.0
+3.0
 1
 10
 1
@@ -203,10 +230,10 @@ GRAPHICS-WINDOW
 1
 1
 1
--50
-50
--50
-50
+-100
+100
+-100
+100
 1
 1
 1
@@ -249,9 +276,9 @@ NIL
 
 BUTTON
 83
-48
+58
 147
-81
+91
 step
 go
 NIL
@@ -265,15 +292,15 @@ NIL
 1
 
 SLIDER
-14
-165
-186
-198
+17
+230
+189
+263
 init-households
 init-households
 0
 50
-1.0
+10.0
 1
 1
 NIL
@@ -281,9 +308,9 @@ HORIZONTAL
 
 SLIDER
 3
-88
+98
 203
-121
+131
 grain-req
 grain-req
 140
@@ -295,26 +322,26 @@ kg/person
 HORIZONTAL
 
 SLIDER
-11
-248
-184
-281
+13
+305
+186
+338
 annual-precip
 annual-precip
 .14
 1
-0.56
+0.54
 .01
 1
 m
 HORIZONTAL
 
 PLOT
-13
-295
-213
-445
-plot 1
+21
+348
+221
+498
+Grain Supply
 NIL
 NIL
 0.0
@@ -323,26 +350,25 @@ NIL
 10.0
 true
 false
-"" ""
+"" "ask turtles [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks grain-supply\n]"
 PENS
-"default" 1.0 0 -16777216 true "" "plot mean [grain-supply] of turtles"
 
 CHOOSER
-142
-132
-280
-177
+18
+179
+156
+224
 tenure
 tenure
 "none" "satisficing" "maximizing"
-2
+0
 
 PLOT
 36
 503
 236
 653
-plot 2
+Landuse
 NIL
 NIL
 0.0
@@ -353,18 +379,22 @@ true
 false
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot count patches with [owner != nobody]"
+"fields" 1.0 0 -955883 true "" "plot (count patches with [field = 1]) * 100 / count patches"
+"woodland" 1.0 0 -15575016 true "" "plot (count patches with [vegetation >= 35]) * 100 / count patches"
+"maquis" 1.0 0 -12087248 true "" "plot (count patches with [vegetation < 35 and vegetation >= 18]) * 100 / count patches "
+"shrub and grassland" 1.0 0 -4399183 true "" "plot (count patches with [vegetation < 18]) * 100 / count patches"
+"avg-fertility" 1.0 0 -8431303 true "" "plot mean [fertility] of patches"
 
 SLIDER
-48
-225
-220
-258
+15
+269
+187
+302
 tenure-drop
 tenure-drop
 .1
 .9
-0.5
+0.2
 .1
 1
 NIL
@@ -375,7 +405,7 @@ PLOT
 534
 468
 684
-plot 3
+Population
 NIL
 NIL
 0.0
@@ -384,9 +414,34 @@ NIL
 10.0
 true
 false
-"" ""
+"" "ask turtles [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks occupants\n]"
 PENS
-"default" 1.0 0 -16777216 true "" "plot sum [occupants] of households"
+
+SLIDER
+10
+141
+220
+174
+wood-req
+wood-req
+1600
+4300
+2000.0
+10
+1
+kg/person
+HORIZONTAL
+
+SWITCH
+512
+633
+660
+666
+dynamic-pop
+dynamic-pop
+1
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
