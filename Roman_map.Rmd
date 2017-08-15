@@ -30,7 +30,7 @@ bbox <- extent(-10, 20, 28, 38)
 cities <- read.csv('NA_cities.csv') %>%
   group_by(BA_rank) %>% 
   mutate(size_est = ifelse(is.na(Size), mean(Size, na.rm=TRUE), Size)) %>%
-  mutate(population = 1.7 * Size^.635, pop_est = 1.7 * size_est^.635)
+  mutate(population = 41.834 * Size^1.3361, pop_est = 41.834 * size_est^1.3361)
 
 roads <- readOGR('Data/Shapefiles/ba_roads.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
