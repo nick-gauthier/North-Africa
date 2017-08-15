@@ -1,28 +1,39 @@
+extensions [ gis ]
+
 breed [households household]
 breed [villages village]
-households-own [fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
+households-own [field-max fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
 villages-own [settled-patches]
 patches-own [settlement patch-yield slope-val soil-depth vegetation fertility farmstead state field owner fallow site]
-globals [wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-ha patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
+globals [cost-raster slope-raster wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
 
 to setup
   clear-all
   set max-veg 50
   set seed-prop .15
   set max-capita-labor 250
-  set patches-per-ha 4
   set patches-per-m2 patches-per-ha / 10000
-  set max-farm-dist 96 * patches-per-ha * .5
-  set max-wood-dist 256 * patches-per-ha * .5
+  set max-farm-dist 75 * sqrt(patches-per-ha)
+  set max-wood-dist 150 * sqrt(patches-per-ha)
   set max-yield 3500 / patches-per-ha
   set birth-rate 0.054
   set death-rate 0.04
   set starvation-threshold 0.6
   set wood-gather-intensity 0.08
+  ;setup-gis
   setup-patches
   setup-village
 
   reset-ticks
+end
+
+to setup-gis
+  set cost-raster gis:load-dataset "cost.asc"
+  gis:set-world-envelope gis:envelope-of cost-raster
+  ;gis:apply-raster cost-raster cost
+
+  set slope-raster gis:load-dataset "slope.asc"
+  gis:apply-raster slope-raster slope-val
 end
 
 to setup-patches
@@ -46,15 +57,17 @@ end
 to setup-village
   create-villages 1 [
    ht
+    ;move-to patch 519 345
     hatch-households init-households [
       set fuzzy-yield [yield "wheat"] of one-of patches in-radius 5 with [fertility > 0]
       set occupants 6
       set grain-supply occupants * grain-req
       set farm-fields no-patches
       set fed-prop 1
+      set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
       ht
     ]
-    let settled-area max list 1 round(.1744 * (sum [occupants] of households-here) ^ .635 * patches-per-ha)
+    let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha)
     set settled-patches min-n-of settled-area patches [distance myself]
     ask settled-patches [
       set pcolor red
@@ -87,10 +100,10 @@ to go
 end
 
 to check-farmland
-  let field-req round ((occupants * grain-req * (1 + seed-prop)) / (fuzzy-yield * .95))
+  let field-req  round ((occupants * grain-req * (1 + seed-prop)) / (fuzzy-yield * expectation-scalar))
   ;set field-req field-req - round (fuzzy-return / fuzzy-yield)
 
-  let field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
+
   set field-req (min list field-req field-max)
   ifelse tenure = "none"
   [ if count farm-fields > 0 [ drop-farmland (count farm-fields) ]
@@ -133,8 +146,8 @@ to choose-farmland [num-fields]
 end
 
 to-report farm-val
-  let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100
-  report slope-val * (((fertility / 100 + 1) * (soil-depth + 1)) / 2) - (1 * (distance myself) / max-farm-dist + lcdeval)
+  ;let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100
+  report slope-val * (((fertility / 100 + 1) * (soil-depth + 1)) / 2) - (1 * (distance myself) / max-farm-dist) ;+ lcdeval)
 end
 
 to-report yield [crop]
@@ -173,7 +186,7 @@ end
 
 to gather-wood
   let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))
-  let wood-patches max-n-of num-patches patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - ((distance myself) / max-wood-dist)))) / (1 + 3) ]
+  let wood-patches max-n-of num-patches patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
   ask wood-patches [
       ifelse vegetation > 35
       [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
@@ -193,13 +206,16 @@ to birth-death
 [ (random-poisson (birth-rate * 100)) / 100 * occupants ]
 [ 0 ]
 
+  if (births - deaths != 0)  [
   set occupants occupants + births - deaths
 
   if occupants <= 0 [ die ]
+  set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
+  ]
   ]
 
   ask villages [
-    let settled-area max list 1 round(.1744 * (sum [occupants] of households-here) ^ .635 * patches-per-ha)
+    let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha)
     if settled-area != count settled-patches [adjust-settlement-size (settled-area - count settled-patches)]
   ]
 
@@ -241,21 +257,21 @@ to regrow-patch
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-290
+286
 10
-901
-622
+785
+510
 -1
 -1
-3.0
+2.443
 1
 10
 1
 1
 1
 0
-1
-1
+0
+0
 1
 -100
 100
@@ -364,10 +380,10 @@ m
 HORIZONTAL
 
 PLOT
-21
-348
-221
-498
+820
+197
+1020
+347
 Grain Supply
 NIL
 NIL
@@ -391,10 +407,10 @@ tenure
 1
 
 PLOT
-36
-503
-236
-653
+817
+365
+1017
+515
 Landuse
 NIL
 NIL
@@ -428,10 +444,10 @@ NIL
 HORIZONTAL
 
 PLOT
-268
-534
-468
-684
+818
+36
+1018
+186
 Population
 NIL
 NIL
@@ -460,15 +476,40 @@ kg/person
 HORIZONTAL
 
 SWITCH
-512
-633
-660
-666
+24
+351
+172
+384
 dynamic-pop
 dynamic-pop
-0
+1
 1
 -1000
+
+CHOOSER
+15
+404
+153
+449
+patches-per-ha
+patches-per-ha
+0.25 0.5 1 2 4 6 10 16
+7
+
+SLIDER
+33
+493
+223
+526
+expectation-scalar
+expectation-scalar
+0
+1
+1.0
+.05
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -837,6 +878,46 @@ NetLogo 6.0.1
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="cell-resolution" repetitions="20" runMetricsEveryStep="false">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="200"/>
+    <metric>mean [grain-supply] of households</metric>
+    <enumeratedValueSet variable="grain-req">
+      <value value="212"/>
+    </enumeratedValueSet>
+    <steppedValueSet variable="expectation-scalar" first="0.7" step="0.05" last="1"/>
+    <enumeratedValueSet variable="tenure-drop">
+      <value value="0.2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="patches-per-ha">
+      <value value="0.25"/>
+      <value value="0.5"/>
+      <value value="1"/>
+      <value value="2"/>
+      <value value="4"/>
+      <value value="6"/>
+      <value value="10"/>
+      <value value="16"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="dynamic-pop">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="init-households">
+      <value value="10"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenure">
+      <value value="&quot;satisficing&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="annual-precip">
+      <value value="0.54"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wood-req">
+      <value value="2000"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
