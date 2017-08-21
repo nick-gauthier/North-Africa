@@ -2,7 +2,7 @@ extensions [ gis ]
 
 breed [households household]
 breed [villages village]
-households-own [depth-weight fertility-weight distance-weight field-max fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
+households-own [frag-weight depth-weight fertility-weight distance-weight field-max fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
 villages-own [settled-patches]
 patches-own [cost settlement patch-yield slope-val soil-depth vegetation fertility state field owner fallow site]
 globals [cost-raster slope-raster wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
@@ -65,6 +65,7 @@ to setup-village
       set fertility-weight ((random 10) + 1) / 10
       set distance-weight ((random 10) + 1) / 10
       set depth-weight ((random 10) + 1) / 10
+      set frag-weight ((random 10) + 1) / 10
       set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
       ht
     ]
@@ -148,10 +149,12 @@ end
 
 to-report farm-val
   let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100
+  let frag-val 1 - (count neighbors with [owner = myself]) / 8
   let fw [fertility-weight] of myself
   let sdw [depth-weight] of myself
   let dw [distance-weight] of myself
-  report slope-val * (((fertility / 100) + fw) * (soil-depth + sdw) / (fw + sdw)) - (dw * (cost) / max-farm-dist + lcdeval)
+  let frag-w [frag-weight] of myself
+  report slope-val * (fw * fertility / 100 + sdw * soil-depth) - dw * (cost) / max-farm-dist - lcdeval ;- frag-w * frag-val
 end
 
 to-report yield [crop]
@@ -333,9 +336,9 @@ NIL
 
 BUTTON
 83
-58
+48
 147
-91
+81
 step
 go
 NIL
@@ -357,7 +360,7 @@ init-households
 init-households
 0
 50
-10.0
+6.0
 1
 1
 NIL
@@ -387,7 +390,7 @@ annual-precip
 annual-precip
 .14
 1
-0.67
+0.53
 .01
 1
 m
@@ -418,7 +421,7 @@ CHOOSER
 tenure
 tenure
 "none" "satisficing" "maximizing"
-2
+1
 
 PLOT
 817
@@ -440,7 +443,6 @@ PENS
 "woodland" 1.0 0 -15575016 true "" "plot (count patches with [vegetation >= 35]) * 100 / count patches"
 "maquis" 1.0 0 -12087248 true "" "plot (count patches with [vegetation < 35 and vegetation >= 18]) * 100 / count patches "
 "shrub and grassland" 1.0 0 -4399183 true "" "plot (count patches with [vegetation < 18]) * 100 / count patches"
-"avg-fertility" 1.0 0 -8431303 true "" "plot mean [fertility] of patches"
 
 SLIDER
 15
