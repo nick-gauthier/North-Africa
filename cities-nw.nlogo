@@ -3,20 +3,25 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;
 extensions [ nw csv gis]
 
-breed [ ecosystems ecosystem ]
+breed [ road-markers road-marker ]
 breed [ cities city]
 
-cities-own [ population attractiveness ]
+patches-own [distance-coast]
+cities-own [ population attractiveness coastal? capital]
 links-own [ flow ]
-globals [ roads-dataset cities-dataset old-pop old-biomass ]
+globals [ coast-dataset roads-dataset cities-dataset old-pop old-biomass ]
 
 to setup
   clear-all
   set-default-shape turtles "circle"
 
   set cities-dataset gis:load-dataset "NA_cities.shp"
-  gis:set-world-envelope gis:envelope-of cities-dataset
+
   set roads-dataset gis:load-dataset "NA_roads.shp"
+  set coast-dataset gis:load-dataset "distance_coast.asc"
+  gis:set-world-envelope gis:envelope-of coast-dataset
+  resize-world 0 gis:width-of coast-dataset 0 gis:height-of coast-dataset
+  gis:apply-raster coast-dataset distance-coast
   setup-cities
   display-roads
   reset-ticks
@@ -30,6 +35,7 @@ to setup-cities
       [ create-cities 1
         [ set xcor item 0 location
           set ycor item 1 location
+
           ifelse equal-pop = True
           [set population 200 set size population / 20]
           [set population gis:property-value vector-feature "pop_est"
@@ -38,7 +44,10 @@ to setup-cities
       ]
   ]
 
-  ask cities [ set attractiveness 1 ]
+  ask cities [ set attractiveness 1
+    set capital nobody
+    ifelse [distance-coast] of patch-here <= 1000 [set coastal? True][set coastal? False]
+  ]
 
   ask cities [create-links-from other cities [hide-link ]]
   ;ask links [set thickness reduce * [population] of both-ends / (link-length + .00001) / 153730 ^ 2 * 10]
@@ -49,20 +58,20 @@ end
 to display-roads
   gis:set-drawing-color blue
   gis:draw roads-dataset 1
- ;foreach gis:feature-list-of roads-dataset [ vector-feature ->
-  ;    let centroid gis:location-of gis:centroid-of vector-feature
+ foreach gis:feature-list-of roads-dataset [ vector-feature ->
+     let centroid gis:location-of gis:centroid-of vector-feature
       ; centroid will be an empty list if it lies outside the bounds
       ; of the current NetLogo world, as defined by our current GIS
       ; coordinate transformation
-   ;   if not empty? centroid
-    ;  [ create-turtles 1
-     ;     [ set xcor item 0 centroid
-      ;      set ycor item 1 centroid
-       ;     set size 0
-        ;    set label gis:property-value vector-feature "NAME"
-         ; ]
-      ;]
-   ; ]
+      if not empty? centroid
+      [ create-road-markers 1
+          [ set xcor item 0 centroid
+            set ycor item 1 centroid
+            hide-turtle
+            set label gis:property-value vector-feature "NAME"
+          ]
+      ]
+    ]
 end
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Main Procedures ;;;
@@ -72,6 +81,7 @@ to go
   update-flows
   update-attractiveness
   update-population
+  recolor-cities
   tick
 end
 
@@ -83,13 +93,14 @@ to update-flows
 end
 
 to-report interaction-strength
-  report ([attractiveness] of end2) ^ alpha * exp(-1 * beta * ln (link-length + .0000001))
+  report ([attractiveness] of end2) ^ alpha * exp(-1 * beta * (link-length)) ;+ .0000001))
 end
 
 to update-attractiveness
-  let k count cities - 1
+  let k 1;count cities - 1
   ask cities [
     let in-flows sum [flow] of my-in-links
+    if coastal? [set in-flows in-flows + in-flows * G]
   set attractiveness attractiveness + epsilon * (in-flows - k * attractiveness)
   ]
 end
@@ -100,20 +111,29 @@ to update-population
   let total-attractiveness sum [attractiveness] of cities
   ask cities [
     set population total-population * attractiveness / total-attractiveness
-    ifelse equal-pop = True
-    [set size population / 20]
-    [set size population / 153730 * 50 ]
+  ]
+  let max-pop max [population] of cities
+  ask cities [set size population / max-pop * 100]
+end
+
+to recolor-cities
+  ask links [hide-link]
+  ask cities [
+    ifelse sum [flow] of my-in-links > sum [flow] of my-out-links
+    [set color red]
+    [ask max-one-of my-out-links [flow][show-link]
+      set color blue]
   ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
 224
 10
-1886
-571
+3225
+920
 -1
 -1
-1.102
+0.5
 1
 10
 1
@@ -123,12 +143,12 @@ GRAPHICS-WINDOW
 0
 0
 1
--750
-750
--250
-250
 0
+3000
 0
+900
+1
+1
 1
 ticks
 30.0
@@ -193,7 +213,7 @@ alpha
 alpha
 .9
 1.1
-1.1
+1.05
 .01
 1
 NIL
@@ -206,9 +226,9 @@ SLIDER
 165
 beta
 beta
-.9
+0
 1.2
-1.06
+0.15
 .01
 1
 NIL
@@ -225,10 +245,10 @@ Scaling Parameters
 1
 
 SLIDER
-5
-489
-185
-522
+25
+355
+205
+388
 urbanization-rate
 urbanization-rate
 0
@@ -259,7 +279,40 @@ epsilon
 epsilon
 0
 1
-0.8
+0.01
+.01
+1
+NIL
+HORIZONTAL
+
+PLOT
+13
+420
+213
+570
+Population distribution
+NIL
+NIL
+0.0
+160000.0
+0.0
+10.0
+true
+false
+"set-histogram-num-bars 10" ""
+PENS
+"default" 1.0 1 -16777216 true "" "histogram [population] of cities"
+
+SLIDER
+35
+277
+207
+310
+G
+G
+0
+1
+0.1
 .1
 1
 NIL
