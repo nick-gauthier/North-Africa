@@ -4,8 +4,8 @@ breed [households household]
 breed [villages village]
 households-own [frag-weight depth-weight fertility-weight distance-weight field-max fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
 villages-own [settled-patches]
-patches-own [cost settlement patch-yield slope-val soil-depth vegetation fertility state field owner fallow site]
-globals [cost-raster slope-raster wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
+patches-own [wetness soil-type cost settlement patch-yield slope-val soil-depth vegetation fertility field owner]
+globals [active-patches null-patches relief-raster soils-raster acc-raster cost-raster slope-raster wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
 
 to setup
   clear-all
@@ -13,8 +13,8 @@ to setup
   set seed-prop .15
   set max-capita-labor 250
   set patches-per-m2 patches-per-ha / 10000
-  set max-farm-dist 1.5 * 60 * 60 ;75 * sqrt(patches-per-ha)
-  set max-wood-dist 4 * 60 * 60 ;150 * sqrt(patches-per-ha)
+  set max-farm-dist 200;75 * sqrt(patches-per-ha) ;1.5 * 60 * 60
+  set max-wood-dist 300; 150 * sqrt(patches-per-ha) ; 4 * 60 * 60
   set max-yield 3500 / patches-per-ha
   set birth-rate 0.054
   set death-rate 0.04
@@ -23,21 +23,32 @@ to setup
   setup-gis
   setup-patches
   setup-village
-
   reset-ticks
 end
 
 to setup-gis
-  set cost-raster gis:load-dataset "cost.asc"
-  gis:set-world-envelope gis:envelope-of cost-raster
-  gis:apply-raster cost-raster cost
-
+  ;set cost-raster gis:load-dataset "cost.asc"
+  set soils-raster gis:load-dataset "soils.asc"
+  set acc-raster gis:load-dataset "acc.asc"
   set slope-raster gis:load-dataset "slope.asc"
+  set relief-raster gis:load-dataset "relief.asc"
+
+  gis:set-world-envelope gis:envelope-of soils-raster
+  resize-world 0 gis:width-of soils-raster 0 gis:height-of soils-raster
+
+  ;gis:apply-raster cost-raster cost
   gis:apply-raster slope-raster slope-val
+  gis:apply-raster soils-raster soil-type
+  gis:apply-raster acc-raster wetness
+
+  set active-patches patches with [(slope-val <= 0) or (slope-val >= 0)]
+  set null-patches patches != active-patches
+
+  gis:paint relief-raster 200
 end
 
 to setup-patches
-  ask patches [
+  ask active-patches [
     ;set slope-val 1
     set soil-depth 1
     set vegetation 50
@@ -45,19 +56,19 @@ to setup-patches
     set field 0
     set fertility 100
     set owner nobody
-    set site FALSE
     set settlement 0
     set patch-yield 0
   ]
+
 end
 
 
 to setup-village
   create-villages 1 [
    ht
-    move-to min-one-of patches [cost]
+    move-to min-one-of active-patches [cost]
     hatch-households init-households [
-      set fuzzy-yield [yield "wheat"] of one-of patches in-radius 5 with [fertility > 0]
+      set fuzzy-yield [yield "wheat"] of one-of active-patches in-radius 5 with [fertility > 0]
       set occupants 6
       set grain-supply occupants * grain-req
       set farm-fields no-patches
@@ -70,7 +81,7 @@ to setup-village
       ht
     ]
     let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha)
-    set settled-patches min-n-of settled-area patches [distance myself]
+    set settled-patches min-n-of settled-area active-patches [distance myself]
     ask settled-patches [
       set pcolor red
       set owner myself
@@ -112,7 +123,7 @@ to check-farmland
     choose-farmland (field-req)]
   [ if field-req < count farm-fields
       [ drop-farmland (count farm-fields - field-req) ]
-    if field-req > count farm-fields and any? other patches with [fertility > 0 and owner = nobody]
+    if field-req > count farm-fields and any? other active-patches with [fertility > 0 and owner = nobody]
       [ choose-farmland (field-req - count farm-fields) ]
   ]
 end
@@ -130,11 +141,13 @@ to drop-farmland [num-fields]
     set field 0
     set pcolor veg-color
   ]
+
+
   set farm-fields farm-fields with [owner = myself]
 end
 
 to choose-farmland [num-fields]
-  let new-fields max-n-of num-fields patches with [owner = nobody] [farm-val]
+  let new-fields max-n-of num-fields active-patches with [owner = nobody] [farm-val]
   ;let patch-clear 0
   ask new-fields [
     set owner myself
@@ -154,7 +167,7 @@ to-report farm-val
   let sdw [depth-weight] of myself
   let dw [distance-weight] of myself
   let frag-w [frag-weight] of myself
-  report slope-val * (fw * fertility / 100 + sdw * soil-depth) - dw * (cost) / max-farm-dist - lcdeval ;- frag-w * frag-val
+  report slope-val * (fw * fertility / 100 + sdw * soil-depth) - dw * (distance myself) / max-farm-dist - lcdeval ;- frag-w * frag-val
 end
 
 to-report yield [crop]
@@ -166,7 +179,6 @@ end
 
 to farm
   ask farm-fields [
-    set fallow 0
     set field 1
 
     ifelse fertility > 0
@@ -193,7 +205,7 @@ end
 
 to gather-wood
   let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))
-  let wood-patches max-n-of num-patches patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (cost / max-wood-dist)))) / (1 + 3) ]
+  let wood-patches max-n-of num-patches active-patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
   ask wood-patches [
       ifelse vegetation > 35
       [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
@@ -231,7 +243,7 @@ end
 to adjust-settlement-size [patch-diff]
   ifelse patch-diff > 0
     [repeat patch-diff [
-      ask one-of patches with [any? neighbors4 with [settlement = 1]][
+      ask one-of active-patches with [any? neighbors4 with [settlement = 1]][
         set owner myself
         set pcolor red
         set settlement 1
@@ -242,11 +254,11 @@ to adjust-settlement-size [patch-diff]
      [set owner nobody
       set settlement 0
       set pcolor veg-color]]
-  set settled-patches patches with [owner = myself]
+  set settled-patches active-patches with [owner = myself]
 end
 
 to regrow-patch
-  ask patches [
+  ask active-patches [
 
     if fertility < 100 [set fertility fertility + random-normal 2 .5 ]
     if fertility > 100 [set fertility 100]
@@ -264,36 +276,36 @@ to regrow-patch
 end
 
 to-report veg-color
-  let slope-color 0
-  ifelse slope-val = 1
-  [set slope-color 0]
-  [ifelse slope-val = .75
-    [set slope-color 10]
-    [set slope-color 20]]
-  report 59.9 - (vegetation * 7.9 / 50) + slope-color
+ ; let slope-color 0
+ ; ifelse slope-val = 1
+ ; [set slope-color 0]
+  ;[ifelse slope-val = .75
+   ; [set slope-color 10]
+    ;[set slope-color 20]]
+  report 59.9 - (vegetation * 7.9 / 50); + slope-color
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
 286
 10
-814
-539
+1340
+564
 -1
 -1
-4.0
+1.0
 1
 10
 1
 1
 1
 0
-0
-0
 1
--65
-65
--65
-65
+1
+1
+0
+1045
+0
+544
 1
 1
 1
@@ -360,7 +372,7 @@ init-households
 init-households
 0
 50
-6.0
+27.0
 1
 1
 NIL
@@ -390,17 +402,17 @@ annual-precip
 annual-precip
 .14
 1
-0.53
+0.55
 .01
 1
 m
 HORIZONTAL
 
 PLOT
-820
-197
-1020
-347
+441
+597
+641
+747
 Grain Supply
 NIL
 NIL
@@ -424,10 +436,10 @@ tenure
 1
 
 PLOT
-817
-365
-1017
-515
+662
+595
+862
+745
 Landuse
 NIL
 NIL
@@ -460,10 +472,10 @@ NIL
 HORIZONTAL
 
 PLOT
-818
-36
-1018
-186
+232
+594
+432
+744
 Population
 NIL
 NIL
@@ -509,8 +521,8 @@ CHOOSER
 449
 patches-per-ha
 patches-per-ha
-0.25 0.5 1 2 4 6 10 16
-4
+0.25 0.5 1 1.25 2 4 6 10 16
+3
 
 SLIDER
 33
@@ -528,10 +540,10 @@ NIL
 HORIZONTAL
 
 PLOT
-867
-560
-1067
-710
+854
+610
+1054
+760
 fertility
 NIL
 NIL
@@ -908,7 +920,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.0.1
+NetLogo 6.0.2
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
