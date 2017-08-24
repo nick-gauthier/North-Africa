@@ -22,7 +22,7 @@ to setup
   set wood-gather-intensity 0.08
   setup-gis
   setup-patches
-  setup-village
+  setup-villages
   reset-ticks
 end
 
@@ -63,21 +63,18 @@ to setup-patches
 end
 
 
-to setup-village
-  create-villages 1 [
+to setup-villages
+  create-villages init-villages [
    ht
-    move-to min-one-of active-patches [cost]
+    move-to one-of active-patches
     hatch-households init-households [
       set fuzzy-yield [yield "wheat"] of one-of active-patches in-radius 5 with [fertility > 0]
       set occupants 6
       set grain-supply occupants * grain-req
       set farm-fields no-patches
       set fed-prop 1
-      set fertility-weight ((random 10) + 1) / 10
-      set distance-weight ((random 10) + 1) / 10
-      set depth-weight ((random 10) + 1) / 10
-      set frag-weight ((random 10) + 1) / 10
       set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
+      choose-farmland min list ((random 10) + 1) field-max
       ht
     ]
     let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha)
@@ -90,16 +87,28 @@ to setup-village
       set patch-yield 0
     ]
   ]
+
+  ifelse variable-weights?
+  [ ask households [
+    set fertility-weight ((random 10) + 1) / 10
+      set distance-weight ((random 10) + 1) / 10
+      set depth-weight ((random 10) + 1) / 10
+    set frag-weight ((random 10) + 1) / 10]]
+  [ask households [
+    set fertility-weight 1
+  set distance-weight 1
+  set depth-weight 1
+    set frag-weight 1] ]
 end
 
 
 to go
-  ;if max-cycles > 0 and ticks >= max-cycles [ stop ]
+
+  ;ask households [check-farmland]
 
   ask households [
-    check-farmland
+  allocate-labor
   ]
-
   ask households [
     farm
     gather-wood
@@ -111,6 +120,12 @@ to go
   regrow-patch
   tick
 end
+
+to allocate-labor
+  ;let profit fuzzy-yield * man-hours ^ 0.3 * (irrigation-water + annual-rainfall) ^ 0.4 * (count farm-fields * patches-per-ha) ^ 0.3
+  ; should be max yield rather than fuzzy-yield ... maybe make a fuzzy max yield?
+end
+
 
 to check-farmland
   let field-req  round ((occupants * grain-req * (1 + seed-prop)) / (fuzzy-yield * expectation-scalar))
@@ -147,7 +162,7 @@ to drop-farmland [num-fields]
 end
 
 to choose-farmland [num-fields]
-  let new-fields max-n-of num-fields active-patches with [owner = nobody] [farm-val]
+  let new-fields max-n-of num-fields active-patches in-radius 20 with [owner = nobody] [farm-val]
   ;let patch-clear 0
   ask new-fields [
     set owner myself
@@ -205,7 +220,7 @@ end
 
 to gather-wood
   let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))
-  let wood-patches max-n-of num-patches active-patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
+  let wood-patches max-n-of num-patches active-patches in-radius 70 with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
   ask wood-patches [
       ifelse vegetation > 35
       [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
@@ -243,7 +258,7 @@ end
 to adjust-settlement-size [patch-diff]
   ifelse patch-diff > 0
     [repeat patch-diff [
-      ask one-of active-patches with [any? neighbors4 with [settlement = 1]][
+      ask one-of active-patches in-radius 3 with [any? neighbors4 with [settlement = 1]][
         set owner myself
         set pcolor red
         set settlement 1
@@ -372,7 +387,7 @@ init-households
 init-households
 0
 50
-27.0
+11.0
 1
 1
 NIL
@@ -394,10 +409,10 @@ kg/person
 HORIZONTAL
 
 SLIDER
-13
-305
-186
-338
+14
+352
+187
+385
 annual-precip
 annual-precip
 .14
@@ -433,7 +448,7 @@ CHOOSER
 tenure
 tenure
 "none" "satisficing" "maximizing"
-1
+2
 
 PLOT
 662
@@ -457,10 +472,10 @@ PENS
 "shrub and grassland" 1.0 0 -4399183 true "" "plot (count patches with [vegetation < 18]) * 100 / count patches"
 
 SLIDER
-15
-269
-187
-302
+16
+316
+188
+349
 tenure-drop
 tenure-drop
 .1
@@ -504,31 +519,31 @@ kg/person
 HORIZONTAL
 
 SWITCH
-24
-351
-172
-384
+25
+398
+173
+431
 dynamic-pop
 dynamic-pop
-1
+0
 1
 -1000
 
 CHOOSER
-15
-404
-153
-449
+16
+451
+154
+496
 patches-per-ha
 patches-per-ha
 0.25 0.5 1 1.25 2 4 6 10 16
 3
 
 SLIDER
-33
-493
-223
-526
+34
+540
+224
+573
 expectation-scalar
 expectation-scalar
 0
@@ -556,6 +571,32 @@ false
 "" ""
 PENS
 "default" 1.0 0 -16777216 true "" "plot mean [fertility] of patches with [owner != nobody]"
+
+SLIDER
+30
+279
+202
+312
+init-villages
+init-villages
+0
+30
+30.0
+1
+1
+NIL
+HORIZONTAL
+
+SWITCH
+35
+611
+215
+644
+variable-weights?
+variable-weights?
+0
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
