@@ -2,7 +2,7 @@ extensions [ gis ]
 
 breed [households household]
 breed [villages village]
-households-own [frag-weight depth-weight fertility-weight distance-weight field-max fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
+households-own [infrastructure frag-weight depth-weight fertility-weight distance-weight field-max fed-prop grain-supply fuzzy-yield fuzzy-return occupants farm-fields]
 villages-own [settled-patches]
 patches-own [wetness soil-type cost settlement patch-yield slope-val soil-depth vegetation fertility field owner]
 globals [active-patches null-patches relief-raster soils-raster acc-raster cost-raster slope-raster wood-gather-intensity starvation-threshold birth-rate death-rate patches-per-m2 max-capita-labor max-farm-dist max-wood-dist max-yield seed-prop max-veg fertility-loss-rate max-fallow fertility-restore-rate]
@@ -20,9 +20,12 @@ to setup
   set death-rate 0.04
   set starvation-threshold 0.6
   set wood-gather-intensity 0.08
-  setup-gis
+
+  if diagnostic-mode = False [setup-gis]
+
   setup-patches
   setup-villages
+
   reset-ticks
 end
 
@@ -33,23 +36,36 @@ to setup-gis
   set slope-raster gis:load-dataset "slope.asc"
   set relief-raster gis:load-dataset "relief.asc"
 
+  set-patch-size 1
   gis:set-world-envelope gis:envelope-of soils-raster
   resize-world 0 gis:width-of soils-raster 0 gis:height-of soils-raster
+
 
   ;gis:apply-raster cost-raster cost
   gis:apply-raster slope-raster slope-val
   gis:apply-raster soils-raster soil-type
   gis:apply-raster acc-raster wetness
 
-  set active-patches patches with [(slope-val <= 0) or (slope-val >= 0)]
-  set null-patches patches != active-patches
+
 
   gis:paint relief-raster 200
 end
 
 to setup-patches
+
+
+  if diagnostic-mode [
+    ask patches [
+      set slope-val 1
+      set soil-type 0
+      set wetness 0
+    ]
+    resize-world 0 200 0 200
+    set-patch-size 3
+  ]
+  set active-patches patches with [(slope-val <= 0) or (slope-val >= 0)]
+  set null-patches patches != active-patches
   ask active-patches [
-    ;set slope-val 1
     set soil-depth 1
     set vegetation 50
     set pcolor veg-color
@@ -106,9 +122,9 @@ to go
 
   ;ask households [check-farmland]
 
-  ask households [
-  allocate-labor
-  ]
+  ;ask households [
+  ;allocate-labor
+  ;]
   ask households [
     farm
     gather-wood
@@ -122,7 +138,9 @@ to go
 end
 
 to allocate-labor
-  ;let profit fuzzy-yield * man-hours ^ 0.3 * (irrigation-water + annual-rainfall) ^ 0.4 * (count farm-fields * patches-per-ha) ^ 0.3
+
+  ;if
+  ;let profit fuzzy-yield * man-hours ^ 0.3 * (infrastructure + annual-rainfall) ^ 0.4 * (count farm-fields * patches-per-ha) ^ 0.3
   ; should be max yield rather than fuzzy-yield ... maybe make a fuzzy max yield?
 end
 
@@ -303,24 +321,24 @@ end
 GRAPHICS-WINDOW
 286
 10
-1340
-564
+897
+622
 -1
 -1
-1.0
+3.0
 1
 10
 1
 1
 1
 0
-1
-1
+0
+0
 1
 0
-1045
+200
 0
-544
+200
 1
 1
 1
@@ -387,7 +405,7 @@ init-households
 init-households
 0
 50
-11.0
+10.0
 1
 1
 NIL
@@ -417,7 +435,7 @@ annual-precip
 annual-precip
 .14
 1
-0.55
+0.6
 .01
 1
 m
@@ -525,7 +543,7 @@ SWITCH
 431
 dynamic-pop
 dynamic-pop
-0
+1
 1
 -1000
 
@@ -555,10 +573,10 @@ NIL
 HORIZONTAL
 
 PLOT
-854
-610
-1054
-760
+867
+596
+1067
+746
 fertility
 NIL
 NIL
@@ -581,7 +599,7 @@ init-villages
 init-villages
 0
 30
-30.0
+1.0
 1
 1
 NIL
@@ -594,6 +612,47 @@ SWITCH
 644
 variable-weights?
 variable-weights?
+0
+1
+-1000
+
+SLIDER
+17
+676
+197
+709
+irrigation-half-sat
+irrigation-half-sat
+0
+1
+0.0
+.1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+15
+717
+210
+750
+irrigation-half-width
+irrigation-half-width
+0
+irrigation-half-sat
+0.2
+.01
+1
+NIL
+HORIZONTAL
+
+SWITCH
+203
+469
+380
+502
+diagnostic-mode
+diagnostic-mode
 0
 1
 -1000
