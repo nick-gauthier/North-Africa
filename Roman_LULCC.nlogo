@@ -89,8 +89,20 @@ to setup-villages
       set grain-supply occupants * grain-req
       set farm-fields no-patches
       set fed-prop 1
+       ifelse variable-weights?
+  [
+    set fertility-weight ((random 10) + 1) / 10
+    set distance-weight ((random 10) + 1) / 10
+    set depth-weight ((random 10) + 1) / 10
+    set frag-weight ((random 10) + 1) / 10]
+  [set fertility-weight 1
+  set distance-weight 1
+  set depth-weight 1
+  set frag-weight 1 ]
+
       set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
       choose-farmland min list ((random 10) + 1) field-max
+      set infrastructure 0
       ht
     ]
     let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha)
@@ -104,17 +116,7 @@ to setup-villages
     ]
   ]
 
-  ifelse variable-weights?
-  [ ask households [
-    set fertility-weight ((random 10) + 1) / 10
-      set distance-weight ((random 10) + 1) / 10
-      set depth-weight ((random 10) + 1) / 10
-    set frag-weight ((random 10) + 1) / 10]]
-  [ask households [
-    set fertility-weight 1
-  set distance-weight 1
-  set depth-weight 1
-    set frag-weight 1] ]
+
 end
 
 
@@ -200,7 +202,7 @@ to-report farm-val
   let sdw [depth-weight] of myself
   let dw [distance-weight] of myself
   let frag-w [frag-weight] of myself
-  report slope-val * (fw * fertility / 100 + sdw * soil-depth) - dw * (distance myself) / max-farm-dist - lcdeval ;- frag-w * frag-val
+  report slope-val * ((fw + fertility / 100) *  (sdw + soil-depth) / (fw + sdw))  - (dw * (distance myself) / max-farm-dist + lcdeval) ;- frag-w * frag-val
 end
 
 to-report yield [crop]
