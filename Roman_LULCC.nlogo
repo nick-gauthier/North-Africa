@@ -245,8 +245,8 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-to rain ; generate rainfall as a stochastic process, approximately gaussian
-    set annual-precip max list 0 ( mean-precip * ( 1 + precip-CV * random-normal 0 1 ) )
+to rain ; generate rainfall as a stochastic process, approximately gaussian, with optional AR(1) persistence
+    set annual-precip max list 0 ( ( mean-precip + (annual-precip - mean-precip) * persistence ) * ( 1 + precip-CV * random-normal 0 1 ) )
 end
 
 
@@ -898,6 +898,21 @@ stochastic-rain?
 0
 1
 -1000
+
+SLIDER
+9
+569
+181
+602
+persistence
+persistence
+0
+1
+0.9
+.1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
