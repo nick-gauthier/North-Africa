@@ -9,8 +9,7 @@ households-own [
   farm-fields        ; list of patches used by household for farming
   field-max          ; maximum number of farm field patches a household can own, based on number of occupants
 
-  fuzzy-yield        ; fuzzy estimate of farm field yields in agent memory
-  fuzzy-return       ; fuzzy estimate of annual food returns in agent memory
+  fuzzy-yield        ; fuzzy estimate of average per-patch crop yields in agent memory
 
   frag-weight        ; weight given to field fragmentation in land selection algorithm
   depth-weight       ; weight given to soil depth in land selection algorithm
@@ -167,7 +166,7 @@ to setup-villages  ; create villages, then have each village create and initiali
       ; initialize household variables related to food production
       set fuzzy-yield [yield "wheat"] of one-of active-patches in-radius 5 with [fertility > 0]  ; give household initial rough estimate of potential crop yields
       set occupants 6                          ; households start off with 6 occupants
-      set grain-supply occupants * grain-req   ; households have enough food to feed its occupants
+      set grain-supply occupants * grain-req   ; households start with enough food to feed its occupants
       set fed-prop 1                           ; ditto
       set farm-fields no-patches               ; households don't own any farm fields
 
@@ -221,6 +220,8 @@ to go
   ; generate annual precipitation as a stochastic process
   if stochastic-rain? [ rain ]
 
+  storage-decay  ; decay food in storage
+
   ; each household farms and gathers wood in turn
   ask households [
     farm
@@ -240,9 +241,14 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to rain ; generate rainfall as a stochastic process, approximately gaussian, with optional AR(1) persistence
-    set annual-precip max list 0 ( ( mean-precip + (annual-precip - mean-precip) * persistence ) * ( 1 + precip-CV * random-normal 0 1 ) )
+  set annual-precip max list 0 ( ( mean-precip + (annual-precip - mean-precip) * persistence ) * ( 1 + precip-CV * random-normal 0 1 ) )
 end
 
+to storage-decay
+  ask households [
+    set grain-supply grain-supply * .5
+  ]
+end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Farming: land selection and harvesting                                                                              ;
@@ -327,26 +333,24 @@ to farm ; agents harvest food from patch and feed occupants
       [ set patch-yield yield "wheat"                    ; calculate yields
         set fertility (fertility - random-normal 3 2) ]  ; reduce fertility of farmed patch
       [ set patch-yield 0 ]                              ; no yields if not fertile
-    if fertility < 0 [set fertility 0]                   ; fertility can't be negative
+    if fertility < 0 [ set fertility 0 ]                   ; fertility can't be negative
     set pcolor 39 - (8 * fertility / 100)                ; adjust patch color to reflect soil fertility
    ]
 
-  ; feed the household and store what remains
-  let gross-return sum [patch-yield] of farm-fields                        ; combine yields from all farmed patches
-  set fed-prop gross-return * (1 - seed-prop) / (grain-req * occupants)    ; what proportion of household is fed after accounting for seed?
-  let net-return gross-return * (1 - seed-prop) - (grain-req * occupants)  ; subtract seed and food grain from yields to find net returns
-  set grain-supply grain-supply + net-return                               ; store what's left
-  if grain-supply < 0 [ set grain-supply 0 ]                               ; can't have negative food stored
+  ; harvest grain, store it, and feed the household
+  let total-harvest sum [patch-yield] of farm-fields                     ; combine yields from all farmed patches
+  set grain-supply grain-supply + total-harvest * (1 - seed-prop)        ; store what's left after removing some grain for seed
+  set fed-prop grain-supply / (grain-req * occupants)                    ; what proportion of household is able to be fed?
+  set grain-supply max list 0 (grain-supply - grain-req * occupants)     ; subtract consumed food from storage without going negative
 
-  ; store yield info in memory
-  set fuzzy-return random-normal net-return abs(net-return * .0333)        ; store total food return in memory, with some error
-  let mean-yield mean [patch-yield] of farm-fields                         ; calculate average patch crop yield
+  ; store yield info in agent memory
+  let mean-yield mean [ patch-yield ] of farm-fields                       ; calculate average patch crop yield
   set fuzzy-yield random-normal mean-yield (mean-yield * .0333)            ; store averge crop yield in memory, with some error
 end
 
 
 to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
-  ifelse annual-precip > 0  ; if there is rain, get yields
+  ifelse annual-precip >= .14  ; if there is rain, get yields. must have at least .14 meters for any yields
     [ let potential-yield ifelse-value (crop = "wheat")
         [ (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility / 100)) + 1)) / 3 ]    ; wheat potential yields
         [ (((0.48 * ln(annual-precip)) + 1.51) * ((0.34 * ln(soil-depth)) + 1.09) * ((0.18 * ln(fertility / 100)) + .98)) / 3 ]  ; barley potential yields
@@ -363,7 +367,7 @@ to gather-wood  ; harvest firewood from vegetated patches
   let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
 
   ; select wood gathering patches based on distance and vegetation type
-  let wood-patches max-n-of num-patches active-patches in-radius 70 with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
+  let wood-patches max-n-of (min list num-patches count active-patches) active-patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
   ask wood-patches [   ; patches with different amounts of vegetation have different amounts of woody biomass available
       ifelse vegetation > 35
       [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
@@ -391,7 +395,7 @@ to birth-death   ; add or remove occupants from household, based on fed proporti
     ]
   ]
 
-  ; check to see if the village needs to grow
+  ; check to see if villages needs to grow
   ask villages [
     let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha) ; population to settled area determined by power law relationship
     if settled-area != count settled-patches [ adjust-settlement-size (settled-area - count settled-patches) ]  ; if there are too many people, grow the village
@@ -431,7 +435,7 @@ to regrow-patch ; restore patch vegetation and soil fertility
   ask active-patches [
 
     if fertility < 100 [ set fertility fertility + random-normal 2 .5 ] ; restore fertility by restoration rate, with some noise
-    if fertility > 100 [ set fertility 100 ]    ; fertility can't excede 100
+    if fertility > 100 [ set fertility 100 ]                            ; fertility can't excede 100
 
     ;restore vegetation on unfarmed, unsettled patches
     if field = 0 and settlement = 0 [
@@ -538,7 +542,7 @@ init-households
 init-households
 0
 50
-13.0
+17.0
 1
 1
 NIL
@@ -588,7 +592,7 @@ NIL
 10.0
 true
 false
-"" ";ask households [\n;  create-temporary-plot-pen (word who)\n;  set-plot-pen-color color\n;  plotxy ticks grain-supply\n;]"
+"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks grain-supply\n]"
 PENS
 
 CHOOSER
@@ -676,7 +680,7 @@ SWITCH
 755
 dynamic-pop
 dynamic-pop
-1
+0
 1
 -1000
 
@@ -732,7 +736,7 @@ init-villages
 init-villages
 0
 30
-2.0
+1.0
 1
 1
 NIL
@@ -842,10 +846,10 @@ fixed-land?
 -1000
 
 PLOT
-965
-454
-1165
-604
+929
+426
+1129
+576
 Precipitation
 NIL
 NIL
@@ -904,7 +908,7 @@ persistence
 persistence
 0
 1
-0.9
+0.4
 .1
 1
 NIL
