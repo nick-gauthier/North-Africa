@@ -223,8 +223,8 @@ to go
   ; labor allocation not yet fully implemented
   ; ask households [ allocate-labor ]
 
-  ; generate annual precipitation based on AR(1) process
-  rain
+  ; generate annual precipitation as a stochastic process
+  if stochastic-rain? [ rain ]
 
   ; each household farms and gathers wood in turn
   ask households [
@@ -245,11 +245,9 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-to rain
-  set annual-precip mean-precip + random-normal 0 (mean-precip * precip-CV) + annual-precip * precip-ar1
-  if annual-precip < 0 [ set annual-precip 0 ]  ; can't have negative rainfall
+to rain ; generate rainfall as a stochastic process, approximately gaussian
+    set annual-precip max list 0 ( mean-precip * ( 1 + precip-CV * random-normal 0 1 ) )
 end
-
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -551,10 +549,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-18
-608
-218
-641
+14
+642
+214
+675
 grain-req
 grain-req
 140
@@ -567,9 +565,9 @@ HORIZONTAL
 
 SLIDER
 10
-471
+499
 177
-504
+532
 mean-precip
 mean-precip
 .14
@@ -661,10 +659,10 @@ false
 PENS
 
 SLIDER
-19
-644
-229
-677
+15
+678
+225
+711
 wood-req
 wood-req
 1600
@@ -676,10 +674,10 @@ kg/person
 HORIZONTAL
 
 SWITCH
-20
-732
-168
-765
+129
+722
+277
+755
 dynamic-pop
 dynamic-pop
 1
@@ -687,10 +685,10 @@ dynamic-pop
 -1000
 
 CHOOSER
-21
-682
-159
-727
+17
+716
+127
+761
 patches-per-ha
 patches-per-ha
 0.25 0.5 1 1.25 2 4 6 10 16
@@ -817,10 +815,10 @@ Land tenure
 1
 
 TEXTBOX
-21
-588
-171
-606
+17
+622
+167
+640
 Constants
 12
 0.0
@@ -877,33 +875,29 @@ Weather
 
 SLIDER
 10
-506
+534
 182
-539
+567
 precip-CV
 precip-CV
 0
-.8
-0.25
-.05
+.9
+0.2
+.1
 1
 NIL
 HORIZONTAL
 
-SLIDER
-8
-543
-180
-576
-precip-ar1
-precip-ar1
+SWITCH
+10
+464
+181
+497
+stochastic-rain?
+stochastic-rain?
 0
 1
-0.6
-.05
-1
-NIL
-HORIZONTAL
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
