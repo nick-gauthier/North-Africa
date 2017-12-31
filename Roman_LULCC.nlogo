@@ -311,14 +311,12 @@ end
 
 
 to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
-
-  ifelse crop = "wheat"
-    [ let potential-yield (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility / 100)) + 1)) / 3
+  ifelse annual-precip > 0
+    [ let potential-yield ifelse-value (crop = "wheat")
+        [ (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility / 100)) + 1)) / 3 ]
+        [ (((0.48 * ln(annual-precip)) + 1.51) * ((0.34 * ln(soil-depth)) + 1.09) * ((0.18 * ln(fertility / 100)) + .98)) / 3 ]
       report (potential-yield * slope-val * max-yield) / patches-per-ha ]
-    [ ifelse crop = "barley"
-    [ let potential-yield (((0.48 * ln(annual-precip)) + 1.51) * ((0.34 * ln(soil-depth)) + 1.09) * ((0.18 * ln(fertility / 100)) + .98)) / 3
-      report (potential-yield * slope-val * max-yield) / patches-per-ha ]
-    [ report 0 ] ]
+    [ report 0 ]
 end
 
 to farm
