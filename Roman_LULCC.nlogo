@@ -12,7 +12,6 @@ households-own [
   fuzzy-yield        ; fuzzy estimate of average per-patch crop yields in agent memory
 
   frag-weight        ; weight given to field fragmentation in land selection algorithm
-  depth-weight       ; weight given to soil depth in land selection algorithm
   fertility-weight   ; weight given to soil fertility in land selection algorithm
   distance-weight    ; weight given to field distance in land selection algorithm
 
@@ -29,7 +28,6 @@ patches-own [
 
   fertility    ; soil fertility
   slope-val    ; patch slope, reclassified based on farmability
-  soil-depth   ; soil depth
 
   field        ; is this patch a farm field?
   owner        ; ID of household owning the patch (if any)
@@ -144,7 +142,6 @@ to setup-patches
   ; setup routine for patches that will be active during the simulation
   ask active-patches [
     set fertility 100      ; all patches begin with uniform maximum fertility
-    set soil-depth 1       ; all patches start out with uniformly deep soil
     set vegetation 50      ; all patches start at climax mediterranean woodland
     set pcolor veg-color   ; change patch color to match vegetation type
 
@@ -170,20 +167,7 @@ to setup-villages  ; create villages, then have each village create and initiali
       set fed-prop 1                           ; ditto
       set farm-fields no-patches               ; households don't own any farm fields
 
-      ; households use several patch attributes to select "good land". if variable-weights is true, households vary in how they weight these attributes (i.e. preferences)
-      ifelse variable-weights? [
-        set fertility-weight ((random 10) + 1) / 10
-        set distance-weight ((random 10) + 1) / 10
-        set depth-weight ((random 10) + 1) / 10
-        set frag-weight ((random 10) + 1) / 10
-      ][
-        set fertility-weight 1
-        set distance-weight 1
-        set depth-weight 1
-        set frag-weight 1
-      ]
-
-      ; households figure out how many fields they can farm, and acquire that number of fewer fields
+      ; households figure out how many fields they can farm, and acquire that number or fewer fields
       set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
       choose-farmland min list ((random 10) + 1) field-max                        ; households start with a random number of fields below this maximum
 
@@ -209,28 +193,26 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to go
+
   ; if fixed land false, agents can select land every time step. otherwise they only select land at the begining of the simulation
   if fixed-land? = FALSE [
     ask households [ check-farmland ]
   ]
 
-  ; labor allocation not yet fully implemented
-  ; ask households [ allocate-labor ]
+  ; ask households [ allocate-labor ]  ; labor allocation not yet fully implemented
 
-  ; generate annual precipitation as a stochastic process
-  if stochastic-rain? [ rain ]
+  if stochastic-rain? [ rain ]         ; generate annual precipitation as a stochastic process
 
-  storage-decay  ; decay food in storage
+  storage-decay                        ; decay food in storage
 
-  ; each household farms and gathers wood in turn
-  ask households [
+  ask households [                     ; each household farms and gathers wood in turn
     farm
     gather-wood
   ]
 
-  if dynamic-pop [birth-death] ; allow households to grow and die if dynamic-pop is turned on
+  if dynamic-pop [birth-death]         ; allow households to grow and die if dynamic-pop is turned on
 
-  regrow-patch                 ; regenerate vegetation and soil fertility
+  regrow-patch                         ; regenerate vegetation and soil fertility
 
   tick
 end
@@ -250,8 +232,9 @@ to storage-decay
   ]
 end
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Farming: land selection and harvesting                                                                              ;
+; Land selection and tenure                                                                                           ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; dynamic labor allocation not yet fully implemented
@@ -309,23 +292,19 @@ to choose-farmland [num-fields]   ; routine for a household to evaluate nearby p
 end
 
 
-to-report farm-val   ; routine households use to evaulate different potential farm patches
+to-report farm-val  ; decision algorithm to assign value to patches with low slopes, high fertility, and less vegetation that are closer to the village
   let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100  ; agents prefer certain vegetation types
+  let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented ones (currently not used)
 
-  ; pull patch attribute weights for decision algorithm from the asking household
-  let fw [fertility-weight] of myself
-  let sdw [depth-weight] of myself
-  let dw [distance-weight] of myself
-  let frag-w [frag-weight] of myself
-  ;let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented ones (currently not used)
-
-  ; decision algorithm to assign value to patches with low slopes, deep soils, more vegetation that are close to the village
-  report slope-val * ((fw + fertility / 100) *  (sdw + soil-depth) / (fw + sdw))  - (dw * (distance myself) / max-farm-dist + lcdeval) ;- frag-w * frag-val
+  report slope-val * (fertility / 100 - (distance myself / max-farm-dist + lcdeval + frag-val) / 3)
 end
 
 
-to farm ; agents harvest food from patch and feed occupants
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Farming and harvesting                                                                                              ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+to farm ; agents harvest food from patch and feed occupants
   ; calculate yields from each farmed patch and modify patch accordingly
   ask farm-fields [
     set field 1
@@ -352,8 +331,8 @@ end
 to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
   ifelse annual-precip >= .14  ; if there is rain, get yields. must have at least .14 meters for any yields
     [ let potential-yield ifelse-value (crop = "wheat")
-        [ (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility / 100)) + 1)) / 3 ]    ; wheat potential yields
-        [ (((0.48 * ln(annual-precip)) + 1.51) * ((0.34 * ln(soil-depth)) + 1.09) * ((0.18 * ln(fertility / 100)) + .98)) / 3 ]  ; barley potential yields
+        [ (((0.51 * ln(annual-precip)) + 1.03) * ((0.19 * ln(fertility / 100)) + 1)) / 2 ]    ; wheat potential yields
+        [ (((0.48 * ln(annual-precip)) + 1.51) * ((0.18 * ln(fertility / 100)) + .98)) / 2 ]  ; barley potential yields
       report (potential-yield * slope-val * max-yield) / patches-per-ha ]   ; modify yields based on slope and make areal unit conversion
     [ report 0 ] ; no yields if no rain
 end
@@ -441,7 +420,7 @@ to regrow-patch ; restore patch vegetation and soil fertility
     if field = 0 and settlement = 0 [
       if vegetation < max-veg [
         ; determine vegetation regrowth rate based on soil factors and regrow accordingly
-        let regrowth-rate (((-0.000118528 * fertility ^ 2) + (0.0215056 * fertility) + 0.0237987) + ((-0.000118528 * soil-depth ^ 2) + (0.0215056 * soil-depth) + 0.0237987)) / 2
+        let regrowth-rate ((-0.000118528 * fertility ^ 2) + (0.0215056 * fertility) + 0.0237987)
         set vegetation vegetation + regrowth-rate
 
         if vegetation > max-veg [ set vegetation max-veg ]  ; can't excede climax vegetation
@@ -703,7 +682,7 @@ expectation-scalar
 expectation-scalar
 0
 1
-0.9
+1.0
 .05
 1
 NIL
@@ -749,7 +728,7 @@ SWITCH
 398
 variable-weights?
 variable-weights?
-1
+0
 1
 -1000
 
