@@ -1,6 +1,5 @@
 extensions [ gis ] ; Load GIS extension for importing environmental layers
 
-
 breed [ households household ]  ; basic agent type
 households-own [
   occupants          ; number of individuals in a household
@@ -22,10 +21,8 @@ households-own [
   ;infrastructure
 ]
 
-
 breed [ villages village ]       ; collective of households, allows for selective coarse-graining
 villages-own [settled-patches]   ; list of patches owned by a village but not farmed (i.e. occupied by village)
-
 
 patches-own [
   vegetation   ; type of vegetation
@@ -44,7 +41,6 @@ patches-own [
   ;wetness     ; terrain wetness coefficient
   ;soil-type    ; soil class
 ]
-
 
 globals [
   active-patches              ; patches that fall within watershed boundary
@@ -213,7 +209,6 @@ end
 ; Runtime                                                                                                             ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
 to go
   ; if fixed land false, agents can select land every time step. otherwise they only select land at the begining of the simulation
   if fixed-land? = FALSE [
@@ -244,7 +239,6 @@ end
 ; Weather                                                                                                             ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
 to rain ; generate rainfall as a stochastic process, approximately gaussian, with optional AR(1) persistence
     set annual-precip max list 0 ( ( mean-precip + (annual-precip - mean-precip) * persistence ) * ( 1 + precip-CV * random-normal 0 1 ) )
 end
@@ -253,7 +247,6 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Farming: land selection and harvesting                                                                              ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 ; dynamic labor allocation not yet fully implemented
 ;to allocate-labor
@@ -297,22 +290,22 @@ end
 
 
 to choose-farmland [num-fields]   ; routine for a household to evaluate nearby patches and select new farm fields
+  ; choose num-fields patches that are unowned and nearby, sorted by farm-val
   let new-fields max-n-of num-fields active-patches in-radius 50 with [owner = nobody] [farm-val]
-  ;let patch-clear 0
+
   ask new-fields [
-    set owner myself
-    set field 1
-    set vegetation 5
+    set owner myself   ; take ownership of patch
+    set field 1        ; turn into a field
+    set vegetation 5   ; clear vegetation to grass
   ]
 
-  ;set cleared-wood cleared-wood + patch-clear
-  ;ask n-of (num-fields / 2) new-fields [ set fallow 1 ]
-  set farm-fields (patch-set farm-fields new-fields)
+  set farm-fields (patch-set farm-fields new-fields)  ; add new fields to existing farm fields
 end
 
 
 to-report farm-val   ; routine households use to evaulate different potential farm patches
   let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100  ; agents prefer certain vegetation types
+
   ; pull patch attribute weights for decision algorithm from the asking household
   let fw [fertility-weight] of myself
   let sdw [depth-weight] of myself
@@ -325,38 +318,40 @@ to-report farm-val   ; routine households use to evaulate different potential fa
 end
 
 
-to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
-  ifelse annual-precip > 0
-    [ let potential-yield ifelse-value (crop = "wheat")
-        [ (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility / 100)) + 1)) / 3 ]
-        [ (((0.48 * ln(annual-precip)) + 1.51) * ((0.34 * ln(soil-depth)) + 1.09) * ((0.18 * ln(fertility / 100)) + .98)) / 3 ]
-      report (potential-yield * slope-val * max-yield) / patches-per-ha ]
-    [ report 0 ]
-end
+to farm ; agents harvest food from patch and feed occupants
 
-to farm
+  ; calculate yields from each farmed patch and modify patch accordingly
   ask farm-fields [
     set field 1
-
-    ifelse fertility > 0
-      [ set patch-yield yield "wheat"
-        set fertility (fertility - random-normal 3 2)]
-    [set patch-yield 0]
-    if fertility < 0 [set fertility 0]
-    set pcolor 39 - (8 * fertility / 100)
+    ifelse fertility > 0                                 ; only farm fertile patches
+      [ set patch-yield yield "wheat"                    ; calculate yields
+        set fertility (fertility - random-normal 3 2) ]  ; reduce fertility of farmed patch
+      [ set patch-yield 0 ]                              ; no yields if not fertile
+    if fertility < 0 [set fertility 0]                   ; fertility can't be negative
+    set pcolor 39 - (8 * fertility / 100)                ; adjust patch color to reflect soil fertility
    ]
 
-  let gross-return sum [patch-yield] of farm-fields
-  set fed-prop gross-return * (1 - seed-prop) / (grain-req * occupants)
-  let net-return gross-return * (1 - seed-prop) - (grain-req * occupants)
+  ; feed the household and store what remains
+  let gross-return sum [patch-yield] of farm-fields                        ; combine yields from all farmed patches
+  set fed-prop gross-return * (1 - seed-prop) / (grain-req * occupants)    ; what proportion of household is fed after accounting for seed?
+  let net-return gross-return * (1 - seed-prop) - (grain-req * occupants)  ; subtract seed and food grain from yields to find net returns
+  set grain-supply grain-supply + net-return                               ; store what's left
+  if grain-supply < 0 [ set grain-supply 0 ]                               ; can't have negative food stored
 
-  set grain-supply grain-supply + net-return
-  if grain-supply < 0 [ set grain-supply 0 ]
+  ; store yield info in memory
+  set fuzzy-return random-normal net-return abs(net-return * .0333)        ; store total food return in memory, with some error
+  let mean-yield mean [patch-yield] of farm-fields                         ; calculate average patch crop yield
+  set fuzzy-yield random-normal mean-yield (mean-yield * .0333)            ; store averge crop yield in memory, with some error
+end
 
-  set fuzzy-return random-normal net-return abs(net-return * .0333)
 
-  let mean-yield mean [patch-yield] of farm-fields
-  set fuzzy-yield random-normal mean-yield (mean-yield * .0333)
+to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
+  ifelse annual-precip > 0  ; if there is rain, get yields
+    [ let potential-yield ifelse-value (crop = "wheat")
+        [ (((0.51 * ln(annual-precip)) + 1.03) * ((0.28 * ln(soil-depth)) + 0.87) * ((0.19 * ln(fertility / 100)) + 1)) / 3 ]    ; wheat potential yields
+        [ (((0.48 * ln(annual-precip)) + 1.51) * ((0.34 * ln(soil-depth)) + 1.09) * ((0.18 * ln(fertility / 100)) + .98)) / 3 ]  ; barley potential yields
+      report (potential-yield * slope-val * max-yield) / patches-per-ha ]   ; modify yields based on slope and make areal unit conversion
+    [ report 0 ] ; no yields if no rain
 end
 
 
@@ -364,10 +359,12 @@ end
 ; Wood gathering                                                                                                      ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to gather-wood
-  let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))
+to gather-wood  ; harvest firewood from vegetated patches
+  let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
+
+  ; select wood gathering patches based on distance and vegetation type
   let wood-patches max-n-of num-patches active-patches in-radius 70 with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
-  ask wood-patches [
+  ask wood-patches [   ; patches with different amounts of vegetation have different amounts of woody biomass available
       ifelse vegetation > 35
       [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
       [ ifelse vegetation > 18
@@ -381,55 +378,54 @@ end
 ; Demography                                                                                                          ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to birth-death
+to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
-    let deaths (random-poisson (death-rate * 100)) / 100 * occupants
-
-    let births ifelse-value (fed-prop >= starvation-threshold) [
-      (random-poisson (birth-rate * 100)) / 100 * occupants
-    ][
-      0
-    ]
-
-    if (births - deaths != 0) [
-      set occupants occupants + births - deaths
-      if occupants <= 0 [ die ]
-      set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha
+    let deaths (random-poisson (death-rate * 100)) / 100 * occupants  ; death rate determined by poisson process
+    let births ifelse-value (fed-prop >= starvation-threshold)        ; births only occur if there is enough food, otherwise nothing happens
+      [ (random-poisson (birth-rate * 100)) / 100 * occupants ]
+      [ 0 ]
+    if (births - deaths != 0) [                                       ; check to see if household size has changed
+      set occupants occupants + births - deaths                       ; adjust household size
+      if occupants <= 0 [ die ]                                       ; die if no one's left
+      set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
     ]
   ]
 
+  ; check to see if the village needs to grow
   ask villages [
-    let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha)
-    if settled-area != count settled-patches [adjust-settlement-size (settled-area - count settled-patches)]
+    let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha) ; population to settled area determined by power law relationship
+    if settled-area != count settled-patches [ adjust-settlement-size (settled-area - count settled-patches) ]  ; if there are too many people, grow the village
   ]
 end
 
 
 to adjust-settlement-size [patch-diff]  ; change settled area to reflect new village population
-  ifelse patch-diff > 0
-    [ repeat patch-diff [
-      ask one-of active-patches in-radius 3 with [any? neighbors4 with [settlement = 1]][
-        set owner myself
-        set pcolor red
-        set settlement 1
-        set field 0
-        set vegetation 0
-        set patch-yield 0]]
+  ifelse patch-diff > 0            ; need to add or subtract settled patches?
+    [ repeat patch-diff [          ; for each patch to be added ...
+        ask one-of active-patches in-radius 3 with [any? neighbors4 with [settlement = 1]][  ; select neighboring empty patch
+          set owner myself           ; take control of patch
+          set pcolor red             ; change color to village
+          set settlement 1           ; mark as settled
+          set field 0                ; remove any fields
+          set vegetation 0           ; remove vegetation
+          set patch-yield 0
+        ]
+      ]
     ][
-      ask max-n-of abs(patch-diff) settled-patches [distance myself] [
-        set owner nobody
-        set settlement 0
-        set pcolor veg-color
+      ask max-n-of abs(patch-diff) settled-patches [distance myself] [  ; for each patch to be removed ...
+        set owner nobody     ; reset ownership
+        set settlement 0     ; remove settlement
+        set pcolor veg-color ; reset vegetation color
       ]
     ]
-  set settled-patches active-patches with [owner = myself]
+
+  set settled-patches active-patches with [owner = myself] ; update village's list of patches it owns
 end
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Vegetation dynamics                                                                                                 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 to regrow-patch ; restore patch vegetation and soil fertility
   ask active-patches [
