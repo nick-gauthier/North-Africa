@@ -51,6 +51,7 @@ globals [
   null-patches                ; empty patches that fall beyond watershed boundary
   patches-per-m2              ; how many m2 are in a patch
 
+  annual-precip               ; actual annual precipitation accumulation, in meters
   max-veg                     ; type of climax vegetation
   wood-gather-intensity       ; rate of wood gathering
   max-wood-dist               ; maximum distance household will travel to collect wood
@@ -78,6 +79,7 @@ globals [
 to setup
   clear-all
 
+  set annual-precip mean-precip     ; initialize precipitation at average value
   set max-veg 50                    ; set climax vegetation to 50 (i.e. uniform mediterranean woodland)
   set wood-gather-intensity 0.08    ; wood gathering rate constant
 
@@ -221,6 +223,9 @@ to go
   ; labor allocation not yet fully implemented
   ; ask households [ allocate-labor ]
 
+  ; generate annual precipitation based on AR(1) process
+  rain
+
   ; each household farms and gathers wood in turn
   ask households [
     farm
@@ -233,6 +238,18 @@ to go
 
   tick
 end
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Weather                                                                                                             ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+to rain
+  set annual-precip mean-precip + random-normal 0 (mean-precip * precip-CV) + annual-precip * precip-ar1
+  if annual-precip < 0 [ set annual-precip 0 ]  ; can't have negative rainfall
+end
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -443,11 +460,11 @@ end
 GRAPHICS-WINDOW
 286
 10
-1340
-564
+897
+622
 -1
 -1
-1.0
+3.0
 1
 10
 1
@@ -458,9 +475,9 @@ GRAPHICS-WINDOW
 0
 1
 0
-1045
+200
 0
-544
+200
 1
 1
 1
@@ -527,17 +544,17 @@ init-households
 init-households
 0
 50
-33.0
+13.0
 1
 1
 NIL
 HORIZONTAL
 
 SLIDER
-10
-561
-210
-594
+18
+608
+218
+641
 grain-req
 grain-req
 140
@@ -549,12 +566,12 @@ kg/person
 HORIZONTAL
 
 SLIDER
-11
-683
-184
-716
-annual-precip
-annual-precip
+10
+471
+177
+504
+mean-precip
+mean-precip
 .14
 1
 0.6
@@ -581,10 +598,10 @@ false
 PENS
 
 CHOOSER
-10
-274
-148
-319
+7
+238
+145
+283
 tenure
 tenure
 "none" "satisficing" "maximizing"
@@ -612,10 +629,10 @@ PENS
 "shrub and grassland" 1.0 0 -4399183 true "" "plot (count patches with [vegetation < 18]) * 100 / count patches"
 
 SLIDER
-11
-325
-183
-358
+8
+289
+180
+322
 tenure-drop
 tenure-drop
 .1
@@ -644,10 +661,10 @@ false
 PENS
 
 SLIDER
-11
-597
-221
-630
+19
+644
+229
+677
 wood-req
 wood-req
 1600
@@ -659,31 +676,31 @@ kg/person
 HORIZONTAL
 
 SWITCH
-12
-721
-160
-754
+20
+732
+168
+765
 dynamic-pop
 dynamic-pop
-0
+1
 1
 -1000
 
 CHOOSER
-13
-635
-151
-680
+21
+682
+159
+727
 patches-per-ha
 patches-per-ha
 0.25 0.5 1 1.25 2 4 6 10 16
 3
 
 SLIDER
-11
-365
-201
-398
+8
+329
+198
+362
 expectation-scalar
 expectation-scalar
 0
@@ -721,17 +738,17 @@ init-villages
 init-villages
 0
 30
-19.0
+2.0
 1
 1
 NIL
 HORIZONTAL
 
 SWITCH
-12
-401
-192
-434
+9
+365
+189
+398
 variable-weights?
 variable-weights?
 1
@@ -775,7 +792,7 @@ SWITCH
 128
 diagnostic-mode
 diagnostic-mode
-1
+0
 1
 -1000
 
@@ -790,20 +807,20 @@ Experimental setup
 1
 
 TEXTBOX
-27
-252
-177
-270
+24
+216
+174
+234
 Land tenure
 12
 0.0
 1
 
 TEXTBOX
-13
-541
-163
-559
+21
+588
+171
+606
 Constants
 12
 0.0
@@ -820,15 +837,73 @@ Placeholders
 1
 
 SWITCH
-12
-439
-145
-472
+9
+403
+142
+436
 fixed-land?
 fixed-land?
 1
 1
 -1000
+
+PLOT
+965
+454
+1165
+604
+Precipitation
+NIL
+NIL
+0.0
+10.0
+0.0
+1.5
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot annual-precip"
+
+TEXTBOX
+11
+448
+161
+466
+Weather
+12
+0.0
+1
+
+SLIDER
+10
+506
+182
+539
+precip-CV
+precip-CV
+0
+.8
+0.25
+.05
+1
+NIL
+HORIZONTAL
+
+SLIDER
+8
+543
+180
+576
+precip-ar1
+precip-ar1
+0
+1
+0.6
+.05
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
