@@ -2,18 +2,14 @@ extensions [ gis ] ; Load GIS extension for importing environmental layers
 
 breed [ households household ]  ; basic agent type
 households-own [
-  occupants          ; number of individuals in a household
   grain-supply       ; volume of grain held by household
-  fed-prop           ; proportion of a household's occupants receiving enough food
+  occupants          ; number of individuals in a household
+  babies             ; number of occupants that do not contribute to labor
+  fed-prop           ; proportion of a household members receiving enough food
 
   farm-fields        ; list of patches used by household for farming
   field-max          ; maximum number of farm field patches a household can own, based on number of occupants
-
   fuzzy-yield        ; fuzzy estimate of average per-patch crop yields in agent memory
-
-  frag-weight        ; weight given to field fragmentation in land selection algorithm
-  fertility-weight   ; weight given to soil fertility in land selection algorithm
-  distance-weight    ; weight given to field distance in land selection algorithm
 
   ; not yet fully implemented:
   ;infrastructure
@@ -24,14 +20,13 @@ villages-own [settled-patches]   ; list of patches owned by a village but not fa
 
 patches-own [
   vegetation   ; type of vegetation
-  settlement   ; does this patch contain a settlement (i.e. village)?
-
   fertility    ; soil fertility
   slope-val    ; patch slope, reclassified based on farmability
+  patch-yield  ; crop yield of farmed fields
 
+  settlement   ; does this patch contain a settlement (i.e. village)?
   field        ; is this patch a farm field?
   owner        ; ID of household owning the patch (if any)
-  patch-yield  ; crop yield of farmed fields
 
   ;GIS variables not yet fully implemented
   ;cost        ; use LCP map instead of euclidean distances
@@ -104,8 +99,8 @@ to setup-gis
 
   ; setup simulation world based on input rasters
   set-patch-size 1  ; one patch = one pixel
-  gis:set-world-envelope gis:envelope-of soils-raster   ; set boundaries of world to be the same as the input rasters
-  resize-world 0 gis:width-of soils-raster 0 gis:height-of soils-raster   ; resize world to match input rasters
+  gis:set-world-envelope gis:envelope-of slope-raster   ; set boundaries of world to be the same as the input rasters
+  resize-world 0 gis:width-of slope-raster 0 gis:height-of slope-raster   ; resize world to match input rasters
 
   ; set patch-specific variables based on GIS rasters imported earlier
   gis:apply-raster slope-raster slope-val
@@ -124,11 +119,7 @@ end
 to setup-patches
   ; check if diagnostic mode is on. if so, setup a world with a uniform environment instead of using GIS data
   if diagnostic-mode [
-    ask patches [
-      set slope-val 1
-      ;set soil-type 0
-      ;set wetness 0
-    ]
+    ask patches [ set slope-val 1 ]
     resize-world 0 200 0 200    ; set world size and patch sizes to reasonable values for fast diagnostic runs
     set-patch-size 3
   ]
@@ -163,6 +154,7 @@ to setup-villages  ; create villages, then have each village create and initiali
       ; initialize household variables related to food production
       set fuzzy-yield [yield "wheat"] of one-of active-patches in-radius 5 with [fertility > 0]  ; give household initial rough estimate of potential crop yields
       set occupants 6                          ; households start off with 6 occupants
+      set babies 0                             ; households start off with no babies
       set grain-supply occupants * grain-req   ; households start with enough food to feed its occupants
       set fed-prop 1                           ; ditto
       set farm-fields no-patches               ; households don't own any farm fields
@@ -195,14 +187,11 @@ end
 to go
 
   ; if fixed land false, agents can select land every time step. otherwise they only select land at the begining of the simulation
-  if fixed-land? = FALSE [
-    ask households [ check-farmland ]
-  ]
+  if fixed-land? = FALSE [ ask households [ check-farmland ] ]
 
   ; ask households [ allocate-labor ]  ; labor allocation not yet fully implemented
 
   if stochastic-rain? [ rain ]         ; generate annual precipitation as a stochastic process
-
   storage-decay                        ; decay food in storage
 
   ask households [                     ; each household farms and gathers wood in turn
@@ -211,7 +200,6 @@ to go
   ]
 
   if dynamic-pop [birth-death]         ; allow households to grow and die if dynamic-pop is turned on
-
   regrow-patch                         ; regenerate vegetation and soil fertility
 
   tick
@@ -227,9 +215,7 @@ to rain ; generate rainfall as a stochastic process, approximately gaussian, wit
 end
 
 to storage-decay
-  ask households [
-    set grain-supply grain-supply * .5
-  ]
+  ask households [ set grain-supply grain-supply * .3 ]
 end
 
 
@@ -317,14 +303,14 @@ to farm ; agents harvest food from patch and feed occupants
    ]
 
   ; harvest grain, store it, and feed the household
-  let total-harvest sum [patch-yield] of farm-fields                     ; combine yields from all farmed patches
-  set grain-supply grain-supply + total-harvest * (1 - seed-prop)        ; store what's left after removing some grain for seed
-  set fed-prop grain-supply / (grain-req * occupants)                    ; what proportion of household is able to be fed?
-  set grain-supply max list 0 (grain-supply - grain-req * occupants)     ; subtract consumed food from storage without going negative
+  let total-harvest sum [patch-yield] of farm-fields                             ; combine yields from all farmed patches
+  set grain-supply grain-supply + total-harvest * (1 - seed-prop)                ; store what's left after removing some grain for seed
+  set fed-prop grain-supply / (grain-req * occupants)                   ; what proportion of household is able to be fed?
+  set grain-supply max list 0 (grain-supply - grain-req * occupants)  ; subtract consumed food from storage without going negative
 
   ; store yield info in agent memory
-  let mean-yield mean [ patch-yield ] of farm-fields                       ; calculate average patch crop yield
-  set fuzzy-yield random-normal mean-yield (mean-yield * .0333)            ; store averge crop yield in memory, with some error
+  let mean-yield mean [ patch-yield ] of farm-fields                ; calculate average patch crop yield
+  set fuzzy-yield random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error
 end
 
 
@@ -346,7 +332,7 @@ to gather-wood  ; harvest firewood from vegetated patches
   let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
 
   ; select wood gathering patches based on distance and vegetation type
-  let wood-patches max-n-of (min list num-patches count active-patches) active-patches with [vegetation >= 9] [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
+  let wood-patches max-n-of (min list num-patches count active-patches) active-patches with [vegetation >= 9] in-radius 90 [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
   ask wood-patches [   ; patches with different amounts of vegetation have different amounts of woody biomass available
       ifelse vegetation > 35
       [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
@@ -363,14 +349,16 @@ end
 
 to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
+    if ticks mod 15 = 0 [ set occupants occupants + babies set babies 0 ]        ; babies turn to laborers every 15 years
     let deaths (random-poisson (death-rate * 100)) / 100 * occupants  ; death rate determined by poisson process
     let births ifelse-value (fed-prop >= starvation-threshold)        ; births only occur if there is enough food, otherwise nothing happens
       [ (random-poisson (birth-rate * 100)) / 100 * occupants ]
       [ 0 ]
-    if (births - deaths != 0) [                                       ; check to see if household size has changed
-      set occupants occupants + births - deaths                       ; adjust household size
-      if occupants <= 0 [ die ]                                       ; die if no one's left
-      set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
+    if (births - deaths != 0) [                  ; check to see if household size has changed
+      set occupants occupants + births - deaths  ; adjust household size
+      if occupants <= 0 [ die ]                  ; die if no one's left
+      set babies babies + births                 ; increase babies if any births occurred
+      set field-max floor (((occupants - babies) * max-capita-labor) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
     ]
   ]
 
@@ -455,8 +443,8 @@ GRAPHICS-WINDOW
 200
 0
 200
-1
-1
+0
+0
 1
 ticks
 30.0
@@ -521,7 +509,7 @@ init-households
 init-households
 0
 50
-17.0
+50.0
 1
 1
 NIL
@@ -529,9 +517,9 @@ HORIZONTAL
 
 SLIDER
 14
-642
+606
 214
-675
+639
 grain-req
 grain-req
 140
@@ -544,9 +532,9 @@ HORIZONTAL
 
 SLIDER
 10
-499
+463
 177
-532
+496
 mean-precip
 mean-precip
 .14
@@ -559,9 +547,9 @@ HORIZONTAL
 
 PLOT
 707
-587
+627
 907
-737
+777
 Grain Supply
 NIL
 NIL
@@ -586,9 +574,9 @@ tenure
 
 PLOT
 928
-585
+625
 1128
-735
+775
 Landuse
 NIL
 NIL
@@ -622,9 +610,9 @@ HORIZONTAL
 
 PLOT
 498
-584
+624
 698
-734
+774
 Population
 NIL
 NIL
@@ -639,9 +627,9 @@ PENS
 
 SLIDER
 15
-678
+642
 225
-711
+675
 wood-req
 wood-req
 1600
@@ -654,9 +642,9 @@ HORIZONTAL
 
 SWITCH
 129
-722
+686
 277
-755
+719
 dynamic-pop
 dynamic-pop
 0
@@ -665,9 +653,9 @@ dynamic-pop
 
 CHOOSER
 17
-716
+680
 127
-761
+725
 patches-per-ha
 patches-per-ha
 0.25 0.5 1 1.25 2 4 6 10 16
@@ -690,9 +678,9 @@ HORIZONTAL
 
 PLOT
 1133
-586
+626
 1333
-736
+776
 fertility
 NIL
 NIL
@@ -722,47 +710,6 @@ NIL
 HORIZONTAL
 
 SWITCH
-9
-365
-189
-398
-variable-weights?
-variable-weights?
-0
-1
--1000
-
-SLIDER
-292
-658
-472
-691
-irrigation-half-sat
-irrigation-half-sat
-0
-1
-0.2
-.1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-290
-699
-485
-732
-irrigation-half-width
-irrigation-half-width
-0
-irrigation-half-sat
-0.2
-.01
-1
-NIL
-HORIZONTAL
-
-SWITCH
 10
 95
 187
@@ -778,7 +725,7 @@ TEXTBOX
 69
 160
 87
-Experimental setup
+Basic setup
 12
 0.0
 1
@@ -795,29 +742,19 @@ Land tenure
 
 TEXTBOX
 17
-622
+586
 167
-640
+604
 Constants
 12
 0.0
 1
 
-TEXTBOX
-296
-631
-446
-649
-Placeholders
-12
-0.0
-1
-
 SWITCH
-9
-403
-142
-436
+11
+367
+144
+400
 fixed-land?
 fixed-land?
 1
@@ -825,10 +762,10 @@ fixed-land?
 -1000
 
 PLOT
-929
-426
-1129
-576
+282
+626
+482
+776
 Precipitation
 NIL
 NIL
@@ -844,9 +781,9 @@ PENS
 
 TEXTBOX
 11
-448
+412
 161
-466
+430
 Weather
 12
 0.0
@@ -854,9 +791,9 @@ Weather
 
 SLIDER
 10
-534
+498
 182
-567
+531
 precip-CV
 precip-CV
 0
@@ -869,9 +806,9 @@ HORIZONTAL
 
 SWITCH
 10
-464
+428
 181
-497
+461
 stochastic-rain?
 stochastic-rain?
 0
@@ -880,9 +817,9 @@ stochastic-rain?
 
 SLIDER
 9
-569
+533
 181
-602
+566
 persistence
 persistence
 0
