@@ -1,78 +1,38 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setup Procedures ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;
-extensions [ nw csv gis]
+extensions [ nw csv ]
 
-breed [ road-markers road-marker ]
 breed [ cities city]
 
-patches-own [distance-coast]
-cities-own [ population attractiveness coastal? capital]
+cities-own [ attractiveness ]
 links-own [ flow ]
-globals [ coast-dataset roads-dataset cities-dataset old-pop old-biomass ]
+globals [ mean-distance dt ]
 
 to setup
   clear-all
   set-default-shape turtles "circle"
+  resize-world 0 49 0 49
+  set-patch-size 10
 
-  set cities-dataset gis:load-dataset "NA_cities.shp"
-
-  set roads-dataset gis:load-dataset "NA_roads.shp"
-  set coast-dataset gis:load-dataset "distance_coast.asc"
-  gis:set-world-envelope gis:envelope-of coast-dataset
-  resize-world 0 gis:width-of coast-dataset 0 gis:height-of coast-dataset
-  gis:apply-raster coast-dataset distance-coast
   setup-cities
-  display-roads
+
+  set mean-distance mean [ link-length ] of links
+  set dt .01
   reset-ticks
 end
 
 to setup-cities
-  foreach gis:feature-list-of cities-dataset [ vector-feature ->
- ; a feature in a point dataset may have multiple points, so we have a list of lists of points, which is why we need to use first twice here
-      let location gis:location-of (first (first (gis:vertex-lists-of vector-feature)))
-      if not empty? location
-      [ create-cities 1
-        [ set xcor item 0 location
-          set ycor item 1 location
-
-          ifelse equal-pop = True
-          [set population 200 set size population / 20]
-          [set population gis:property-value vector-feature "pop_est"
-          set size population / 153730 * 50]
-        ]
-      ]
+  create-cities city-count [
+    set size 3
+    set attractiveness size
+    move-to one-of patches
+    set color blue
+    create-links-from other cities [ hide-link ]
   ]
-
-  ask cities [ set attractiveness 1
-    set capital nobody
-    ifelse [distance-coast] of patch-here <= 1000 [set coastal? True][set coastal? False]
-  ]
-
-  ask cities [create-links-from other cities [hide-link ]]
-  ;ask links [set thickness reduce * [population] of both-ends / (link-length + .00001) / 153730 ^ 2 * 10]
 end
 
-; Drawing polyline data from a shapefile, and optionally loading some
-; of the data into turtles, if label-rivers is true
-to display-roads
-  gis:set-drawing-color blue
-  gis:draw roads-dataset 1
- foreach gis:feature-list-of roads-dataset [ vector-feature ->
-     let centroid gis:location-of gis:centroid-of vector-feature
-      ; centroid will be an empty list if it lies outside the bounds
-      ; of the current NetLogo world, as defined by our current GIS
-      ; coordinate transformation
-      if not empty? centroid
-      [ create-road-markers 1
-          [ set xcor item 0 centroid
-            set ycor item 1 centroid
-            hide-turtle
-            set label gis:property-value vector-feature "NAME"
-          ]
-      ]
-    ]
-end
+
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Main Procedures ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;
@@ -87,53 +47,45 @@ end
 
 to update-flows
   ask cities [
-    let total-interaction sum [interaction-strength] of my-out-links
-    ask my-out-links [ set flow [population] of myself * interaction-strength / total-interaction ]
+    let total-interaction sum [ interaction-strength ] of my-out-links
+    ask my-out-links [ set flow [ size ] of myself * interaction-strength / total-interaction ]
   ]
 end
 
 to-report interaction-strength
-  report ([attractiveness] of end2) ^ alpha * exp(-1 * beta * (link-length)) ;+ .0000001))
+  report ([attractiveness] of end2) ^ alpha * exp(-1 * beta * link-length / mean-distance)
 end
 
 to update-attractiveness
-  let k 1;count cities - 1
   ask cities [
-    let in-flows sum [flow] of my-in-links
-    if coastal? [set in-flows in-flows + in-flows * G]
-  set attractiveness attractiveness + epsilon * (in-flows - k * attractiveness)
+    let in-flows sum [ flow ] of my-in-links
+    set attractiveness attractiveness + dt * (in-flows - attractiveness) * attractiveness
   ]
 end
 
-
 to update-population
-  let total-population sum [population] of cities
-  let total-attractiveness sum [attractiveness] of cities
-  ask cities [
-    set population total-population * attractiveness / total-attractiveness
-  ]
-  let max-pop max [population] of cities
-  ask cities [set size population / max-pop * 100]
+  let total-attractiveness sum [ attractiveness ] of cities
+  ask cities [ set size count cities * attractiveness / total-attractiveness ]
 end
 
 to recolor-cities
   ask links [hide-link]
   ask cities [
     ifelse sum [flow] of my-in-links > sum [flow] of my-out-links
-    [set color red]
-    [ask max-one-of my-out-links [flow][show-link]
-      set color blue]
+      [ set color red ]
+      [ ask max-one-of my-out-links [flow][show-link]
+        set color blue ]
   ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
 224
 10
-3225
-920
+732
+519
 -1
 -1
-0.5
+10.0
 1
 10
 1
@@ -144,9 +96,9 @@ GRAPHICS-WINDOW
 0
 1
 0
-3000
+49
 0
-900
+49
 1
 1
 1
@@ -205,10 +157,10 @@ NIL
 1
 
 SLIDER
-9
-93
-181
-126
+7
+156
+179
+189
 alpha
 alpha
 .9
@@ -220,100 +172,52 @@ NIL
 HORIZONTAL
 
 SLIDER
-9
-132
-181
-165
+7
+195
+179
+228
 beta
 beta
-0
-1.2
-0.15
-.01
+20
+60
+40.0
+5
 1
 NIL
 HORIZONTAL
 
 TEXTBOX
-10
-74
-160
-92
+8
+137
+158
+155
 Scaling Parameters
 12
 0.0
 1
 
-SLIDER
-25
-355
-205
-388
-urbanization-rate
-urbanization-rate
-0
-1
-0.1
-.01
-1
-NIL
-HORIZONTAL
-
 SWITCH
-10
-216
+5
+46
 189
-249
-equal-pop
-equal-pop
-1
+79
+dev-mode?
+dev-mode?
+0
 1
 -1000
 
 SLIDER
-33
-311
-205
-344
-epsilon
-epsilon
-0
+5
+81
+177
+114
+city-count
+city-count
 1
-0.01
-.01
+50
+48.0
 1
-NIL
-HORIZONTAL
-
-PLOT
-13
-420
-213
-570
-Population distribution
-NIL
-NIL
-0.0
-160000.0
-0.0
-10.0
-true
-false
-"set-histogram-num-bars 10" ""
-PENS
-"default" 1.0 1 -16777216 true "" "histogram [population] of cities"
-
-SLIDER
-35
-277
-207
-310
-G
-G
-0
-1
-0.1
-.1
 1
 NIL
 HORIZONTAL
