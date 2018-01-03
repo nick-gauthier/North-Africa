@@ -1,19 +1,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setup Procedures ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;
-extensions [ nw csv ]
+extensions [ nw ls csv palette ]
 
 breed [ cities city]
 
-cities-own [ attractiveness ]
+cities-own [ population attractiveness ]
 links-own [ flow ]
 globals [ mean-distance dt ]
 
 to setup
+  ls:reset
   clear-all
   set-default-shape turtles "circle"
-  resize-world 0 49 0 49
-  set-patch-size 10
+  resize-world 0 99 0 99
+  set-patch-size 5
 
   setup-cities
 
@@ -24,12 +25,17 @@ end
 
 to setup-cities
   create-cities city-count [
-    set size 3
-    set attractiveness size
+    set size 1
+    set attractiveness 1
     move-to one-of patches
     set color blue
     create-links-from other cities [ hide-link ]
+    if use-ls? [
+      ls:create-models 1 "Roman_LULCC.nlogo"
+      ls:ask ls:models [ set dynamic-pop FALSE setup ]
+    ]
   ]
+  update-population
 end
 
 
@@ -38,6 +44,7 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;
 
 to go
+  if use-ls? [ ls:ask ls:models [ go ] ]
   update-flows
   update-attractiveness
   update-population
@@ -48,7 +55,7 @@ end
 to update-flows
   ask cities [
     let total-interaction sum [ interaction-strength ] of my-out-links
-    ask my-out-links [ set flow [ size ] of myself * interaction-strength / total-interaction ]
+    ask my-out-links [ set flow [ population ] of myself * interaction-strength / total-interaction ]
   ]
 end
 
@@ -65,18 +72,20 @@ end
 
 to update-population
   let total-attractiveness sum [ attractiveness ] of cities
-  ask cities [ set size count cities * attractiveness / total-attractiveness ]
+  ask cities [ set population count cities * attractiveness / total-attractiveness ]
 end
 
 to recolor-cities
   ask links [hide-link]
   ask cities [
-    ifelse sum [flow] of my-in-links > sum [flow] of my-out-links
-      [ set color red ]
-      [ ask max-one-of my-out-links [flow][show-link]
-        set color blue ]
+    set color palette:scale-gradient palette:scheme-colors "Divergent" "RdYlBu" 11 population 4 0
+    set size population + 1
+    if sum [flow] of my-in-links < sum [flow] of my-out-links
+      [ ask max-one-of my-out-links [flow] [show-link] ]
   ]
 end
+
+;nystuen dacey
 @#$#@#$#@
 GRAPHICS-WINDOW
 224
@@ -85,20 +94,20 @@ GRAPHICS-WINDOW
 519
 -1
 -1
-10.0
+5.0
 1
 10
 1
 1
 1
 0
-0
-0
+1
+1
 1
 0
-49
+99
 0
-49
+99
 1
 1
 1
@@ -158,24 +167,24 @@ NIL
 
 SLIDER
 7
-156
 179
-189
+179
+212
 alpha
 alpha
 .9
 1.1
-1.05
+0.9
 .01
 1
 NIL
 HORIZONTAL
 
 SLIDER
-7
-195
-179
-228
+5
+218
+177
+251
 beta
 beta
 20
@@ -187,40 +196,40 @@ NIL
 HORIZONTAL
 
 TEXTBOX
-8
-137
-158
-155
+10
+159
+160
+177
 Scaling Parameters
 12
 0.0
 1
 
-SWITCH
-5
-46
-189
-79
-dev-mode?
-dev-mode?
-0
-1
--1000
-
 SLIDER
+7
+90
+179
+123
+city-count
+city-count
+0
+100
+100.0
 5
-81
-177
-114
-city-count
-city-count
-1
-50
-48.0
-1
 1
 NIL
 HORIZONTAL
+
+SWITCH
+6
+54
+112
+87
+use-ls?
+use-ls?
+1
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
