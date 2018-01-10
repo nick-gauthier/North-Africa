@@ -37,6 +37,8 @@ vignettes/*.pdf
 
 Data/
 
+data/
+
 *.html
 
 wc2-5/
