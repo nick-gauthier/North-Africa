@@ -23,6 +23,7 @@ library(pleiades)
 Import SRTM basemap
 ```{r}
 bbox <- extent(-10, 20, 28, 38)
+bbox <- extent(-4, 18, 30, 38)
 ```
 
 
@@ -30,8 +31,17 @@ bbox <- extent(-10, 20, 28, 38)
 cities <- read.csv('NA_cities.csv') %>%
   group_by(BA_rank) %>% 
   mutate(size_est = ifelse(is.na(Size), mean(Size, na.rm=TRUE), Size)) %>%
-  mutate(population = 41.834 * Size^1.3361, pop_est = 41.834 * size_est^1.3361)
+  mutate(population = 41.834 * Size^1.3361, pop_est = 41.834 * size_est^1.3361) %>%
+  filter(between(lat, 30, 38) & between(lon, -4, 18))
 
+max(cities$pop_est)
+  coordinates(cities) <- ~lon + lat
+shapefile(cities, filename = 'NA_cities')
+```
+
+
+
+```{r}
 roads <- readOGR('Data/Shapefiles/ba_roads.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
   crop(bbox) %>%
@@ -48,12 +58,14 @@ centuriation <- readOGR('Data/Shapefiles/centuriation_polygons.shp') %>%
 
 ```{r}
 ggplot(cities, aes(lon, lat)) +
-  geom_path(data = roads, aes(long, lat, group = group), alpha = .5) +
-  geom_point(aes(color = pop_est, size = pop_est), alpha = .8) +
+  geom_path(data = roads, aes(long, lat, group = group), color = 'lightgrey') + #alpha = .5) +
+  geom_point(aes(size = pop_est * 10)) +
   scale_size_area() +
-  scale_color_viridis() +
+  #scale_color_viridis() +
   theme_void() +
-  coord_fixed()
+  coord_fixed() + theme(legend.position="none")
+
+ggsave('roman_network.png')
 ```
 
 ```{r}
@@ -88,7 +100,7 @@ places <- pl_search_places() %>%
   filter(str_detect(periods, 'R')) %>%
   print
 
-places %>% filter(str_detect(type, 'villa')) %>%
+places %>% filter(str_detect(type, 'villa'))
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
   geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
@@ -138,7 +150,6 @@ ggplot(aes(lon, lat)) +
   theme_void() +
   geom_point(data = cities, aes(lon, lat, size = pop_est), color = 'white') +
   scale_size_area()
-
 ```
 Compare to environmental covariates
 ```{r, eval=FALSE, include=FALSE}

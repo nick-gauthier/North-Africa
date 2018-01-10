@@ -80,12 +80,11 @@ to recolor-cities
   ask cities [
     set color palette:scale-gradient palette:scheme-colors "Divergent" "RdYlBu" 11 population 4 0
     set size population + 1
+    ;nystuen dacey
     if sum [flow] of my-in-links < sum [flow] of my-out-links
       [ ask max-one-of my-out-links [flow] [show-link] ]
   ]
 end
-
-;nystuen dacey
 @#$#@#$#@
 GRAPHICS-WINDOW
 224
