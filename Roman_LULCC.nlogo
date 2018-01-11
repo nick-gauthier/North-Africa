@@ -9,14 +9,18 @@ households-own [
 
   farm-fields        ; list of patches used by household for farming
   field-max          ; maximum number of farm field patches a household can own, based on number of occupants
-  fuzzy-yield        ; fuzzy estimate of average per-patch crop yields in agent memory
+  yield-memory        ; average per-patch crop yields in agent memory
+  field-yield-estimate ; yield per field estimate
+  starve-count
+  efficiency-list ; over or undershoot list
+  efficiency
 
   ; not yet fully implemented:
-  ;infrastructure
+  ; infrastructure
 ]
 
 breed [ villages village ]       ; collective of households, allows for selective coarse-graining
-villages-own [settled-patches]   ; list of patches owned by a village but not farmed (i.e. occupied by village)
+villages-own [ settled-patches ]   ; list of patches owned by a village but not farmed (i.e. occupied by village)
 
 patches-own [
   vegetation   ; type of vegetation
@@ -24,9 +28,9 @@ patches-own [
   slope-val    ; patch slope, reclassified based on farmability
   patch-yield  ; crop yield of farmed fields
 
-  settlement   ; does this patch contain a settlement (i.e. village)?
-  field        ; is this patch a farm field?
-  owner        ; ID of household owning the patch (if any)
+  settlement?   ; does this patch contain a settlement (i.e. village)?
+  field?        ; is this patch a farm field?
+  owner         ; ID of household owning the patch (if any)
 
   ;GIS variables not yet fully implemented
   ;cost        ; use LCP map instead of euclidean distances
@@ -84,9 +88,10 @@ to setup
   set death-rate 0.04               ; initial death rate
   set starvation-threshold 0.6      ; birth ceases if household has less than 60% of its food requirement
 
-  if diagnostic-mode = False [setup-gis]      ; if diagnostic mode is off, import gis data
+  if dev-mode? = False [setup-gis]      ; if diagnostic mode is off, import gis data
   setup-patches                               ; patch-specific setup procedures
   setup-villages                              ; village and household setup procedures
+  setup-households
 
   reset-ticks
 end
@@ -118,10 +123,10 @@ end
 
 to setup-patches
   ; check if diagnostic mode is on. if so, setup a world with a uniform environment instead of using GIS data
-  if diagnostic-mode [
+  if dev-mode? [
     ask patches [ set slope-val 1 ]
-    resize-world 0 200 0 200    ; set world size and patch sizes to reasonable values for fast diagnostic runs
-    set-patch-size 3
+    resize-world 0 100 0 100    ; set world size and patch sizes to reasonable values for fast diagnostic runs
+    set-patch-size 6
   ]
 
   ; Now determine which patches are active in the simulation, or should be masked out of computations because they
@@ -136,33 +141,32 @@ to setup-patches
     set vegetation 50      ; all patches start at climax mediterranean woodland
     set pcolor veg-color   ; change patch color to match vegetation type
 
-    set field 0            ; all patches start out unfarmed
+    set field? FALSE       ; all patches start out unfarmed
     set owner nobody       ; all pathces start out without an owner
-    set settlement 0       ; no patches are settled
+    set settlement? FALSE       ; no patches are settled
     set patch-yield 0      ; yield for unfarmed patches is 0
   ]
 end
 
 
 to setup-villages  ; create villages, then have each village create and initialize households
-  create-villages init-villages [
+  create-villages ifelse-value dev-mode? [1] [init-villages] [
     ht  ; hide the village turtles
-    move-to one-of active-patches  ; move villages to random locations
+    ifelse dev-mode?
+      [ move-to patch 49 49 ]
+    [ move-to one-of active-patches ] ; move villages to random locations
 
     ; villages create households and initialize them
     hatch-households init-households [
-      ; initialize household variables related to food production
-      set fuzzy-yield [yield "wheat"] of one-of active-patches in-radius 5 with [fertility > 0]  ; give household initial rough estimate of potential crop yields
+     ; initialize household variables related to food production
+      set yield-memory (list [yield "wheat"] of one-of active-patches in-radius 5 with [fertility > 0])  ; give household initial rough estimate of potential crop yields
       set occupants 6                          ; households start off with 6 occupants
       set babies 0                             ; households start off with no babies
       set grain-supply occupants * grain-req   ; households start with enough food to feed its occupants
       set fed-prop 1                           ; ditto
       set farm-fields no-patches               ; households don't own any farm fields
-
-      ; households figure out how many fields they can farm, and acquire that number or fewer fields
-      set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
-      choose-farmland min list ((random 10) + 1) field-max                        ; households start with a random number of fields below this maximum
-
+      set starve-count 0
+      set efficiency-list []
       ht  ; hide household turtles
     ]
 
@@ -172,14 +176,20 @@ to setup-villages  ; create villages, then have each village create and initiali
     ask settled-patches [
       set pcolor red
       set owner myself     ; make village owner of patch
-      set settlement 1     ; turn patch into settlement
+      set settlement? TRUE     ; turn patch into settlement
       set vegetation 0     ; clear vegetation from settlement
       set patch-yield 0    ; settled patches don't produce crops
     ]
   ]
 end
 
-
+to setup-households
+  ask households [
+      ; households figure out how many fields they can farm, and acquire that number or fewer fields
+      set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
+      choose-farmland min list ((random 10) + 1) field-max                        ; households start with a random number of fields below this maximum
+    ]
+end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Runtime                                                                                                             ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -187,19 +197,25 @@ end
 to go
 
   ; if fixed land false, agents can select land every time step. otherwise they only select land at the begining of the simulation
-  if fixed-land? = FALSE [ ask households [ check-farmland ] ]
+  if fixed-land? = FALSE [
+    ask households [
+      calculate-field-yield
+      check-farmland
+    ]
 
   ; ask households [ allocate-labor ]  ; labor allocation not yet fully implemented
+  ]
 
   if stochastic-rain? [ rain ]         ; generate annual precipitation as a stochastic process
   storage-decay                        ; decay food in storage
 
   ask households [                     ; each household farms and gathers wood in turn
     farm
-    gather-wood
   ]
 
-  if dynamic-pop [birth-death]         ; allow households to grow and die if dynamic-pop is turned on
+  if dev-mode? = FALSE [ ask households [ gather-wood ] ]
+
+  if dynamic-pop? [birth-death]        ; allow households to grow and die if dynamic-pop? is turned on
   regrow-patch                         ; regenerate vegetation and soil fertility
 
   tick
@@ -215,7 +231,7 @@ to rain ; generate rainfall as a stochastic process, approximately gaussian, wit
 end
 
 to storage-decay
-  ask households [ set grain-supply grain-supply * .3 ]
+  ask households [ set grain-supply grain-supply - grain-supply * .3 ]
 end
 
 
@@ -225,15 +241,40 @@ end
 
 ; dynamic labor allocation not yet fully implemented
 ;to allocate-labor
-  ;let profit fuzzy-yield * man-hours ^ 0.3 * (infrastructure + annual-rainfall) ^ 0.4 * (count farm-fields * patches-per-ha) ^ 0.3
+  ;let profit yield-memory * man-hours ^ 0.3 * (infrastructure + annual-rainfall) ^ 0.4 * (count farm-fields * patches-per-ha) ^ 0.3
 ;end
 
+to calculate-field-yield ; household calculates the field number needed from the yield-memory and the field-decision-strat
+  if field-decision-strat = "last year" [
+    set field-yield-estimate (last yield-memory)
+  ]
+  if field-decision-strat = "average" [
+    set field-yield-estimate (mean yield-memory)
+  ]
+  if field-decision-strat = "lowest" [
+    set field-yield-estimate (min yield-memory)
+  ]
+  if field-decision-strat = "random-uniform" [  ; add something like normal distribution later?
+    set field-yield-estimate (one-of yield-memory)
+  ]
+  if field-decision-strat = "avg(lowest+last)" [
+    set field-yield-estimate (mean list (min yield-memory) (last yield-memory))
+  ]
+  ; if field-decision-strat = "gambler's fallacy" [ ; to be implemented
+  ;  set field-yield-estimate ( ) ]
 
-to check-farmland   ; agents assess how many fields they need given household size, crop yields, fuzzy memory, and tenure strategy, and add or drop land accordingly
-  let field-req  round ((occupants * grain-req * (1 + seed-prop)) / (fuzzy-yield * expectation-scalar))
+end
+
+
+to check-farmland ; agents assess how many fields they need given household size, crop yields, and tenure strategy, and add or drop land accordingly
+  ; calcuates fields required
+  let field-req 0
+  carefully [
+    set field-req  round ((occupants * grain-req * (1 + seed-prop)) / (field-yield-estimate * expectation-scalar))
+  ][
+    set field-req field-max
+  ]
   set field-req (min list field-req field-max)
-
-  ; after the household calculates the number of fields it needs, the next step depends on the land tenure strategy
   ifelse tenure = "none" [   ; if no land tenure, household drops all fields and chooses new ones
     if count farm-fields > 0 [ drop-farmland (count farm-fields) ]
     choose-farmland (field-req)
@@ -256,12 +297,14 @@ to drop-farmland [num-fields]  ; routine that drops a given number of fields acc
   ask drop-fields [       ; routine for resotring dropped farm fields to their "natural" state
     set owner nobody      ; unfarmed fields have no owner
     set patch-yield 0     ; unfarmed fields have no crop yields
-    set field 0           ; no longer a field
+    set field? FALSE     ; no longer a field
     set pcolor veg-color  ; update patch color to vegetation
   ]
 
   set farm-fields farm-fields with [owner = myself]  ; update the household's list of fields it owns
 end
+
+
 
 
 to choose-farmland [num-fields]   ; routine for a household to evaluate nearby patches and select new farm fields
@@ -270,7 +313,7 @@ to choose-farmland [num-fields]   ; routine for a household to evaluate nearby p
 
   ask new-fields [
     set owner myself   ; take ownership of patch
-    set field 1        ; turn into a field
+    set field? TRUE    ; turn into a field
     set vegetation 5   ; clear vegetation to grass
   ]
 
@@ -280,7 +323,7 @@ end
 
 to-report farm-val  ; decision algorithm to assign value to patches with low slopes, high fertility, and less vegetation that are closer to the village
   let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100  ; agents prefer certain vegetation types
-  let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented ones (currently not used)
+  let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented one
 
   report slope-val * (fertility / 100 - (distance myself / max-farm-dist + lcdeval + frag-val) / 3)
 end
@@ -293,7 +336,6 @@ end
 to farm ; agents harvest food from patch and feed occupants
   ; calculate yields from each farmed patch and modify patch accordingly
   ask farm-fields [
-    set field 1
     ifelse fertility > 0                                 ; only farm fertile patches
       [ set patch-yield yield "wheat"                    ; calculate yields
         set fertility (fertility - random-normal 3 2) ]  ; reduce fertility of farmed patch
@@ -304,14 +346,30 @@ to farm ; agents harvest food from patch and feed occupants
 
   ; harvest grain, store it, and feed the household
   let total-harvest sum [patch-yield] of farm-fields                             ; combine yields from all farmed patches
+  if ticks > 25 [
+    set efficiency-list lput abs (total-harvest - (grain-req * occupants * (1 + seed-prop))) efficiency-list
+    set efficiency mean efficiency-list
+    if total-harvest < (grain-req * occupants * (1 + seed-prop)) [
+      set starve-count starve-count + 1
+    ]
+  ]
   set grain-supply grain-supply + total-harvest * (1 - seed-prop)                ; store what's left after removing some grain for seed
   set fed-prop grain-supply / (grain-req * occupants)                   ; what proportion of household is able to be fed?
   set grain-supply max list 0 (grain-supply - grain-req * occupants)  ; subtract consumed food from storage without going negative
 
+  remember
+
+end
+
+to remember
   ; store yield info in agent memory
   let mean-yield mean [ patch-yield ] of farm-fields                ; calculate average patch crop yield
-  set fuzzy-yield random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error
+  set yield-memory lput mean-yield yield-memory
+  if (length yield-memory) > yield-memory-length                    ; comparing memory length to slider memory length input
+  	[ set yield-memory remove-item 0 yield-memory ]
+  ;set fuzzy-yield-memory random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error;
 end
+
 
 
 to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
@@ -324,6 +382,8 @@ to-report yield [crop]  ; report crop yields given yield-reduction factors based
 end
 
 
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Wood gathering                                                                                                      ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -332,7 +392,7 @@ to gather-wood  ; harvest firewood from vegetated patches
   let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
 
   ; select wood gathering patches based on distance and vegetation type
-  let wood-patches max-n-of (min list num-patches count active-patches) active-patches with [vegetation >= 9] in-radius 90 [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
+  let wood-patches max-n-of (min list num-patches count (active-patches with [vegetation >= 9] in-radius 90)) (active-patches with [vegetation >= 9] in-radius 90) [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
   ask wood-patches [   ; patches with different amounts of vegetation have different amounts of woody biomass available
       ifelse vegetation > 35
       [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
@@ -349,7 +409,7 @@ end
 
 to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
-    if ticks mod 15 = 0 [ set occupants occupants + babies set babies 0 ]        ; babies turn to laborers every 15 years
+    if ticks mod 15 = 0 [ set babies 0 ]        ; babies turn to laborers every 15 years
     let deaths (random-poisson (death-rate * 100)) / 100 * occupants  ; death rate determined by poisson process
     let births ifelse-value (fed-prop >= starvation-threshold)        ; births only occur if there is enough food, otherwise nothing happens
       [ (random-poisson (birth-rate * 100)) / 100 * occupants ]
@@ -373,11 +433,11 @@ end
 to adjust-settlement-size [patch-diff]  ; change settled area to reflect new village population
   ifelse patch-diff > 0            ; need to add or subtract settled patches?
     [ repeat patch-diff [          ; for each patch to be added ...
-        ask one-of active-patches in-radius 3 with [any? neighbors4 with [settlement = 1]][  ; select neighboring empty patch
+        ask one-of active-patches in-radius 3 with [any? neighbors4 with [settlement? = TRUE]][  ; select neighboring empty patch
           set owner myself           ; take control of patch
           set pcolor red             ; change color to village
-          set settlement 1           ; mark as settled
-          set field 0                ; remove any fields
+          set settlement? TRUE       ; mark as settled
+          set field? FALSE           ; remove any fields
           set vegetation 0           ; remove vegetation
           set patch-yield 0
         ]
@@ -385,7 +445,7 @@ to adjust-settlement-size [patch-diff]  ; change settled area to reflect new vil
     ][
       ask max-n-of abs(patch-diff) settled-patches [distance myself] [  ; for each patch to be removed ...
         set owner nobody     ; reset ownership
-        set settlement 0     ; remove settlement
+        set settlement? FALSE     ; remove settlement
         set pcolor veg-color ; reset vegetation color
       ]
     ]
@@ -405,7 +465,7 @@ to regrow-patch ; restore patch vegetation and soil fertility
     if fertility > 100 [ set fertility 100 ]                            ; fertility can't excede 100
 
     ;restore vegetation on unfarmed, unsettled patches
-    if field = 0 and settlement = 0 [
+    if field? = FALSE and settlement? = FALSE [
       if vegetation < max-veg [
         ; determine vegetation regrowth rate based on soil factors and regrow accordingly
         let regrowth-rate ((-0.000118528 * fertility ^ 2) + (0.0215056 * fertility) + 0.0237987)
@@ -425,11 +485,11 @@ end
 GRAPHICS-WINDOW
 286
 10
-897
-622
+900
+625
 -1
 -1
-3.0
+6.0
 1
 10
 1
@@ -440,11 +500,11 @@ GRAPHICS-WINDOW
 0
 1
 0
-200
+100
 0
-200
-0
-0
+100
+1
+1
 1
 ticks
 30.0
@@ -509,7 +569,7 @@ init-households
 init-households
 0
 50
-50.0
+5.0
 1
 1
 NIL
@@ -539,7 +599,7 @@ mean-precip
 mean-precip
 .14
 1
-0.6
+0.9
 .01
 1
 m
@@ -559,8 +619,9 @@ NIL
 10.0
 true
 false
-"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks grain-supply\n]"
+"" ""
 PENS
+"pen-0" 1.0 0 -3844592 true "" "plot mean [grain-supply] of households"
 
 CHOOSER
 7
@@ -588,7 +649,7 @@ true
 false
 "" ""
 PENS
-"fields" 1.0 0 -955883 true "" "plot (count patches with [field = 1]) * 100 / count patches"
+"fields" 1.0 0 -955883 true "" "plot (count patches with [field? = TRUE]) * 100 / count patches"
 "woodland" 1.0 0 -15575016 true "" "plot (count patches with [vegetation >= 35]) * 100 / count patches"
 "maquis" 1.0 0 -12087248 true "" "plot (count patches with [vegetation < 35 and vegetation >= 18]) * 100 / count patches "
 "shrub and grassland" 1.0 0 -4399183 true "" "plot (count patches with [vegetation < 18]) * 100 / count patches"
@@ -643,11 +704,11 @@ HORIZONTAL
 SWITCH
 129
 686
-277
+284
 719
-dynamic-pop
-dynamic-pop
-0
+dynamic-pop?
+dynamic-pop?
+1
 1
 -1000
 
@@ -703,7 +764,7 @@ init-villages
 init-villages
 0
 30
-1.0
+0.0
 1
 1
 NIL
@@ -714,8 +775,8 @@ SWITCH
 95
 187
 128
-diagnostic-mode
-diagnostic-mode
+dev-mode?
+dev-mode?
 0
 1
 -1000
@@ -798,7 +859,7 @@ precip-CV
 precip-CV
 0
 .9
-0.2
+0.8
 .1
 1
 NIL
@@ -824,11 +885,53 @@ persistence
 persistence
 0
 1
-0.4
+0.9
 .1
 1
 NIL
 HORIZONTAL
+
+SLIDER
+928
+29
+1100
+62
+yield-memory-length
+yield-memory-length
+1
+50
+45.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+929
+462
+1129
+612
+Fed Proportion
+NIL
+NIL
+0.0
+10.0
+0.0
+2.0
+true
+false
+"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks fed-prop\n]"
+PENS
+
+CHOOSER
+932
+96
+1075
+141
+field-decision-strat
+field-decision-strat
+"random-uniform" "last year" "lowest" "average" "avg(lowest+last)"
+2
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -1231,6 +1334,205 @@ NetLogo 6.0.2
     </enumeratedValueSet>
     <enumeratedValueSet variable="annual-precip">
       <value value="0.54"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wood-req">
+      <value value="2000"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="strategy-experiment" repetitions="100" runMetricsEveryStep="false">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="125"/>
+    <metric>mean [starve-count] of households</metric>
+    <metric>mean [efficiency] of households</metric>
+    <enumeratedValueSet variable="field-decision-strat">
+      <value value="&quot;avg(lowest+last)&quot;"/>
+      <value value="&quot;average&quot;"/>
+      <value value="&quot;lowest&quot;"/>
+      <value value="&quot;random-uniform&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="grain-req">
+      <value value="212"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="stochastic-rain?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="patches-per-ha">
+      <value value="1.25"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="fixed-land?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="dynamic-pop?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="init-households">
+      <value value="5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="precip-CV">
+      <value value="0.2"/>
+      <value value="0.8"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="yield-memory-length">
+      <value value="1"/>
+      <value value="5"/>
+      <value value="25"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="init-villages">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="dev-mode?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="expectation-scalar">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenure-drop">
+      <value value="0.2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="mean-precip">
+      <value value="0.3"/>
+      <value value="0.9"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenure">
+      <value value="&quot;satisficing&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="persistence">
+      <value value="0.5"/>
+      <value value="0"/>
+      <value value="0.9"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wood-req">
+      <value value="2000"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="memory-experiment" repetitions="50" runMetricsEveryStep="false">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="125"/>
+    <metric>mean [starve-count] of households</metric>
+    <metric>mean [efficiency] of households</metric>
+    <enumeratedValueSet variable="field-decision-strat">
+      <value value="&quot;avg(lowest+last)&quot;"/>
+      <value value="&quot;average&quot;"/>
+      <value value="&quot;lowest&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="grain-req">
+      <value value="212"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="stochastic-rain?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="patches-per-ha">
+      <value value="1.25"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="fixed-land?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="dynamic-pop?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="init-households">
+      <value value="5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="precip-CV">
+      <value value="0.8"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="yield-memory-length">
+      <value value="1"/>
+      <value value="5"/>
+      <value value="15"/>
+      <value value="25"/>
+      <value value="35"/>
+      <value value="45"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="init-villages">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="dev-mode?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="expectation-scalar">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenure-drop">
+      <value value="0.2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="mean-precip">
+      <value value="0.3"/>
+      <value value="0.9"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenure">
+      <value value="&quot;satisficing&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="persistence">
+      <value value="0.5"/>
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wood-req">
+      <value value="2000"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="memory-experiment2" repetitions="50" runMetricsEveryStep="false">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="125"/>
+    <metric>mean [starve-count] of households</metric>
+    <enumeratedValueSet variable="field-decision-strat">
+      <value value="&quot;avg(lowest+last)&quot;"/>
+      <value value="&quot;average&quot;"/>
+      <value value="&quot;lowest&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="grain-req">
+      <value value="212"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="stochastic-rain?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="patches-per-ha">
+      <value value="1.25"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="fixed-land?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="dynamic-pop?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="init-households">
+      <value value="5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="precip-CV">
+      <value value="0.8"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="yield-memory-length">
+      <value value="1"/>
+      <value value="5"/>
+      <value value="15"/>
+      <value value="25"/>
+      <value value="35"/>
+      <value value="45"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="init-villages">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="dev-mode?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="expectation-scalar">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenure-drop">
+      <value value="0.2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="mean-precip">
+      <value value="0.3"/>
+      <value value="0.9"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenure">
+      <value value="&quot;satisficing&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="persistence">
+      <value value="0.9"/>
     </enumeratedValueSet>
     <enumeratedValueSet variable="wood-req">
       <value value="2000"/>

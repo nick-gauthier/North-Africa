@@ -18,6 +18,7 @@ library(raster)
 library(rasterVis)
 library(tidyverse)
 library(ClimClass)
+library(parallel)
 ```
 
 
