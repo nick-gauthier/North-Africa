@@ -28,7 +28,7 @@ bbox <- extent(-4, 18, 30, 38)
 
 
 ```{r}
-cities <- read.csv('NA_cities.csv') %>%
+cities <- read.csv('data/NA_cities.csv') %>%
   group_by(BA_rank) %>% 
   mutate(size_est = ifelse(is.na(Size), mean(Size, na.rm=TRUE), Size)) %>%
   mutate(population = 41.834 * Size^1.3361, pop_est = 41.834 * size_est^1.3361) %>%

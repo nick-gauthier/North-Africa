@@ -1,4 +1,4 @@
-extensions [ gis ] ; Load GIS extension for importing environmental layers
+extensions [ gis R ] ; Load GIS extension for importing environmental layers
 
 breed [ households household ]  ; basic agent type
 households-own [
@@ -12,11 +12,6 @@ households-own [
   yield-memory        ; average per-patch crop yields in agent memory
   field-yield-estimate ; yield per field estimate
   starve-count
-  efficiency-list ; over or undershoot list
-  efficiency
-
-  ; not yet fully implemented:
-  ; infrastructure
 ]
 
 breed [ villages village ]       ; collective of households, allows for selective coarse-graining
@@ -26,6 +21,7 @@ patches-own [
   vegetation   ; type of vegetation
   fertility    ; soil fertility
   slope-val    ; patch slope, reclassified based on farmability
+  elev         ; patch elevation
   patch-yield  ; crop yield of farmed fields
 
   settlement?   ; does this patch contain a settlement (i.e. village)?
@@ -40,7 +36,6 @@ patches-own [
 
 globals [
   active-patches              ; patches that fall within watershed boundary
-  null-patches                ; empty patches that fall beyond watershed boundary
   patches-per-m2              ; how many m2 are in a patch
 
   annual-precip               ; actual annual precipitation accumulation, in meters
@@ -62,6 +57,7 @@ globals [
   acc-raster                  ; GIS raster of soil wetness (accumulation)
   cost-raster                 ; GIS raster of anisotropic LCPs from village locations
   slope-raster                ; GIS raster of terrain slope, reclassified based on impacts on arability
+  elev-raster                 ; GIS raster of elevation
 ]
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -70,6 +66,7 @@ globals [
 
 to setup
   clear-all
+  r:clear
 
   set annual-precip mean-precip     ; initialize precipitation at average value
   set max-veg 50                    ; set climax vegetation to 50 (i.e. uniform mediterranean woodland)
@@ -91,6 +88,7 @@ to setup
   if dev-mode? = False [setup-gis]      ; if diagnostic mode is off, import gis data
   setup-patches                               ; patch-specific setup procedures
   setup-villages                              ; village and household setup procedures
+  setup-r
   setup-households
 
   reset-ticks
@@ -99,8 +97,9 @@ end
 
 to setup-gis
   ; load GIS raster maps
-  set slope-raster gis:load-dataset "slope.asc"
-  set relief-raster gis:load-dataset "relief.asc"
+  set slope-raster gis:load-dataset "data/netlogo/slope.asc"
+  set relief-raster gis:load-dataset "data/netlogo/relief.asc"
+  set elev-raster gis:load-dataset "data/netlogo/elev.asc"
 
   ; setup simulation world based on input rasters
   set-patch-size 1  ; one patch = one pixel
@@ -109,6 +108,7 @@ to setup-gis
 
   ; set patch-specific variables based on GIS rasters imported earlier
   gis:apply-raster slope-raster slope-val
+  gis:apply-raster elev-raster elev
   gis:paint relief-raster 200  ; use hillshade map to visualize terrain
 
   ;placeholders for other gis variables not yet fully implemented
@@ -124,7 +124,6 @@ end
 to setup-patches
   ; check if diagnostic mode is on. if so, setup a world with a uniform environment instead of using GIS data
   if dev-mode? [
-    ask patches [ set slope-val 1 ]
     resize-world 0 100 0 100    ; set world size and patch sizes to reasonable values for fast diagnostic runs
     set-patch-size 6
   ]
@@ -133,10 +132,10 @@ to setup-patches
   ; fall beyond the watershed boundaries of the gis data. calculating these available patches now saves on computational
   ; time during the simulation.
   set active-patches patches with [(slope-val <= 0) or (slope-val >= 0)]  ; necessary workaround to detect all non-null patches in the GIS data
-  set null-patches patches != active-patches  ; which patches should be ignored throughout the simulation?
 
   ; setup routine for patches that will be active during the simulation
   ask active-patches [
+    if dev-mode? [ set slope-val 1 set elev 1 ]
     set fertility 100      ; all patches begin with uniform maximum fertility
     set vegetation 50      ; all patches start at climax mediterranean woodland
     set pcolor veg-color   ; change patch color to match vegetation type
@@ -166,7 +165,6 @@ to setup-villages  ; create villages, then have each village create and initiali
       set fed-prop 1                           ; ditto
       set farm-fields no-patches               ; households don't own any farm fields
       set starve-count 0
-      set efficiency-list []
       ht  ; hide household turtles
     ]
 
@@ -190,6 +188,29 @@ to setup-households
       choose-farmland min list ((random 10) + 1) field-max                        ; households start with a random number of fields below this maximum
     ]
 end
+
+
+to setup-r
+  r:eval "library(gdistance)"
+  (r:putagentdf "elev_dat" patches "pxcor" "pycor" "elev")
+  r:eval "elev_dat <- rasterFromXYZ(elev_dat)"
+  r:eval "altDiff <- function(x){x[2] - x[1]}"
+  r:eval "hd <- transition(elev_dat, altDiff, 8, symm=FALSE)"
+  r:eval "adj <- adjacent(elev_dat, cells=1:ncell(elev_dat), pairs=TRUE, directions=8)"
+  r:eval "slope.c <- geoCorrection(hd, type = 'c')"
+  r:eval "speed.c <- slope.c"
+  r:eval "speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))"
+  r:eval "Conductance.c <- geoCorrection(speed.c, type = 'c')"
+  r:eval "rm(hd, adj, slope.c, speed.c)"
+  r:gc
+
+  ask village 0 [
+    r:put "points" list xcor ycor
+    r:eval "acc <- accCost(Conductance.c, points)"
+    r:eval "plot(acc)"
+  ]
+end
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Runtime                                                                                                             ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -209,10 +230,7 @@ to go
   if stochastic-rain? [ rain ]         ; generate annual precipitation as a stochastic process
   storage-decay                        ; decay food in storage
 
-  ask households [                     ; each household farms and gathers wood in turn
-    farm
-  ]
-
+  ask households [ farm ]              ; each household farms and gathers wood in turn
   if dev-mode? = FALSE [ ask households [ gather-wood ] ]
 
   if dynamic-pop? [birth-death]        ; allow households to grow and die if dynamic-pop? is turned on
@@ -245,19 +263,16 @@ end
 ;end
 
 to calculate-field-yield ; household calculates the field number needed from the yield-memory and the field-decision-strat
-  if field-decision-strat = "last year" [
-    set field-yield-estimate (last yield-memory)
-  ]
   if field-decision-strat = "average" [
     set field-yield-estimate (mean yield-memory)
   ]
   if field-decision-strat = "lowest" [
     set field-yield-estimate (min yield-memory)
   ]
-  if field-decision-strat = "random-uniform" [  ; add something like normal distribution later?
+  if field-decision-strat = "random" [
     set field-yield-estimate (one-of yield-memory)
   ]
-  if field-decision-strat = "avg(lowest+last)" [
+  if field-decision-strat = "peak-end" [
     set field-yield-estimate (mean list (min yield-memory) (last yield-memory))
   ]
   ; if field-decision-strat = "gambler's fallacy" [ ; to be implemented
@@ -315,6 +330,7 @@ to choose-farmland [num-fields]   ; routine for a household to evaluate nearby p
     set owner myself   ; take ownership of patch
     set field? TRUE    ; turn into a field
     set vegetation 5   ; clear vegetation to grass
+    set pcolor 45
   ]
 
   set farm-fields (patch-set farm-fields new-fields)  ; add new fields to existing farm fields
@@ -341,20 +357,18 @@ to farm ; agents harvest food from patch and feed occupants
         set fertility (fertility - random-normal 3 2) ]  ; reduce fertility of farmed patch
       [ set patch-yield 0 ]                              ; no yields if not fertile
     if fertility < 0 [ set fertility 0 ]                   ; fertility can't be negative
-    set pcolor 39 - (8 * fertility / 100)                ; adjust patch color to reflect soil fertility
+    ;set pcolor 39 - (8 * fertility / 100)                ; adjust patch color to reflect soil fertility
    ]
 
   ; harvest grain, store it, and feed the household
   let total-harvest sum [patch-yield] of farm-fields                             ; combine yields from all farmed patches
   if ticks > 25 [
-    set efficiency-list lput abs (total-harvest - (grain-req * occupants * (1 + seed-prop))) efficiency-list
-    set efficiency mean efficiency-list
     if total-harvest < (grain-req * occupants * (1 + seed-prop)) [
       set starve-count starve-count + 1
     ]
   ]
-  set grain-supply grain-supply + total-harvest * (1 - seed-prop)                ; store what's left after removing some grain for seed
-  set fed-prop grain-supply / (grain-req * occupants)                   ; what proportion of household is able to be fed?
+  set grain-supply grain-supply + total-harvest * (1 - seed-prop)     ; store what's left after removing some grain for seed
+  set fed-prop grain-supply / (grain-req * occupants)                 ; what proportion of household is able to be fed?
   set grain-supply max list 0 (grain-supply - grain-req * occupants)  ; subtract consumed food from storage without going negative
 
   remember
@@ -370,8 +384,6 @@ to remember
   ;set fuzzy-yield-memory random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error;
 end
 
-
-
 to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
   ifelse annual-precip >= .14  ; if there is rain, get yields. must have at least .14 meters for any yields
     [ let potential-yield ifelse-value (crop = "wheat")
@@ -382,14 +394,12 @@ to-report yield [crop]  ; report crop yields given yield-reduction factors based
 end
 
 
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Wood gathering                                                                                                      ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to gather-wood  ; harvest firewood from vegetated patches
-  let num-patches round(occupants * wood-req / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
+  let num-patches round(wood-req * occupants ^ 0.8 / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
 
   ; select wood gathering patches based on distance and vegetation type
   let wood-patches max-n-of (min list num-patches count (active-patches with [vegetation >= 9] in-radius 90)) (active-patches with [vegetation >= 9] in-radius 90) [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
@@ -444,9 +454,9 @@ to adjust-settlement-size [patch-diff]  ; change settled area to reflect new vil
       ]
     ][
       ask max-n-of abs(patch-diff) settled-patches [distance myself] [  ; for each patch to be removed ...
-        set owner nobody     ; reset ownership
+        set owner nobody          ; reset ownership
         set settlement? FALSE     ; remove settlement
-        set pcolor veg-color ; reset vegetation color
+        set pcolor veg-color      ; reset vegetation color
       ]
     ]
 
@@ -485,11 +495,11 @@ end
 GRAPHICS-WINDOW
 286
 10
-900
-625
+1340
+564
 -1
 -1
-6.0
+1.0
 1
 10
 1
@@ -500,9 +510,9 @@ GRAPHICS-WINDOW
 0
 1
 0
-100
+1045
 0
-100
+544
 1
 1
 1
@@ -599,7 +609,7 @@ mean-precip
 mean-precip
 .14
 1
-0.9
+0.24
 .01
 1
 m
@@ -764,7 +774,7 @@ init-villages
 init-villages
 0
 30
-0.0
+3.0
 1
 1
 NIL
@@ -777,7 +787,7 @@ SWITCH
 128
 dev-mode?
 dev-mode?
-0
+1
 1
 -1000
 
@@ -859,7 +869,7 @@ precip-CV
 precip-CV
 0
 .9
-0.8
+0.0
 .1
 1
 NIL
@@ -885,7 +895,7 @@ persistence
 persistence
 0
 1
-0.9
+0.5
 .1
 1
 NIL
@@ -900,38 +910,21 @@ yield-memory-length
 yield-memory-length
 1
 50
-45.0
+10.0
 1
 1
 NIL
 HORIZONTAL
 
-PLOT
-929
-462
-1129
-612
-Fed Proportion
-NIL
-NIL
-0.0
-10.0
-0.0
-2.0
-true
-false
-"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks fed-prop\n]"
-PENS
-
 CHOOSER
 932
 96
-1075
+1090
 141
 field-decision-strat
 field-decision-strat
-"random-uniform" "last year" "lowest" "average" "avg(lowest+last)"
-2
+"random" "lowest" "average" "peak-end"
+3
 
 @#$#@#$#@
 ## WHAT IS IT?
