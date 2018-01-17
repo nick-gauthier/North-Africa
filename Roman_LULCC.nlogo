@@ -1,4 +1,4 @@
-extensions [ gis R ] ; Load GIS extension for importing environmental layers
+extensions [ gis R pathdir ] ; Load GIS extension for importing environmental layers
 
 breed [ households household ]  ; basic agent type
 households-own [
@@ -15,13 +15,15 @@ households-own [
 ]
 
 breed [ villages village ]       ; collective of households, allows for selective coarse-graining
-villages-own [ settled-patches ]   ; list of patches owned by a village but not farmed (i.e. occupied by village)
+villages-own [
+  settled-patches ; list of patches owned by a village but not farmed (i.e. occupied by village)
+  farm-catchment
+]
 
 patches-own [
   vegetation   ; type of vegetation
   fertility    ; soil fertility
   slope-val    ; patch slope, reclassified based on farmability
-  elev         ; patch elevation
   patch-yield  ; crop yield of farmed fields
 
   settlement?   ; does this patch contain a settlement (i.e. village)?
@@ -57,7 +59,6 @@ globals [
   acc-raster                  ; GIS raster of soil wetness (accumulation)
   cost-raster                 ; GIS raster of anisotropic LCPs from village locations
   slope-raster                ; GIS raster of terrain slope, reclassified based on impacts on arability
-  elev-raster                 ; GIS raster of elevation
 ]
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -99,16 +100,15 @@ to setup-gis
   ; load GIS raster maps
   set slope-raster gis:load-dataset "data/netlogo/slope.asc"
   set relief-raster gis:load-dataset "data/netlogo/relief.asc"
-  set elev-raster gis:load-dataset "data/netlogo/elev.asc"
 
   ; setup simulation world based on input rasters
   set-patch-size 1  ; one patch = one pixel
   gis:set-world-envelope gis:envelope-of slope-raster   ; set boundaries of world to be the same as the input rasters
   resize-world 0 gis:width-of slope-raster 0 gis:height-of slope-raster   ; resize world to match input rasters
 
+
   ; set patch-specific variables based on GIS rasters imported earlier
   gis:apply-raster slope-raster slope-val
-  gis:apply-raster elev-raster elev
   gis:paint relief-raster 200  ; use hillshade map to visualize terrain
 
   ;placeholders for other gis variables not yet fully implemented
@@ -135,7 +135,7 @@ to setup-patches
 
   ; setup routine for patches that will be active during the simulation
   ask active-patches [
-    if dev-mode? [ set slope-val 1 set elev 1 ]
+    if dev-mode? [ set slope-val 1 ]
     set fertility 100      ; all patches begin with uniform maximum fertility
     set vegetation 50      ; all patches start at climax mediterranean woodland
     set pcolor veg-color   ; change patch color to match vegetation type
@@ -153,7 +153,7 @@ to setup-villages  ; create villages, then have each village create and initiali
     ht  ; hide the village turtles
     ifelse dev-mode?
       [ move-to patch 49 49 ]
-    [ move-to one-of active-patches ] ; move villages to random locations
+    [ move-to one-of active-patches with [ slope-val  >= 0.75 ] ] ; move villages to random locations
 
     ; villages create households and initialize them
     hatch-households init-households [
@@ -192,23 +192,43 @@ end
 
 to setup-r
   r:eval "library(gdistance)"
-  (r:putagentdf "elev_dat" patches "pxcor" "pycor" "elev")
-  r:eval "elev_dat <- rasterFromXYZ(elev_dat)"
+
+  ifelse dev-mode?
+    [ (r:putagentdf "elev" patches "pxcor" "pycor" "fertility")
+      show r:get "elev"
+      r:eval "elev <- rasterFromXYZ(elev)" ]
+    [ r:put "elev.dir" (word pathdir:get-model-path "/data/netlogo/elev.asc")
+      r:eval "elev <- raster(elev.dir, crs = \"+proj=lcc +lat_1=43 +lat_2=62 +lat_0=30 +lon_0=10 +x_0=0 +y_0=0 +ellps=intl +units=m +no_defs\")"]
+
   r:eval "altDiff <- function(x){x[2] - x[1]}"
-  r:eval "hd <- transition(elev_dat, altDiff, 8, symm=FALSE)"
-  r:eval "adj <- adjacent(elev_dat, cells=1:ncell(elev_dat), pairs=TRUE, directions=8)"
-  r:eval "slope.c <- geoCorrection(hd, type = 'c')"
-  r:eval "speed.c <- slope.c"
-  r:eval "speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))"
-  r:eval "Conductance.c <- geoCorrection(speed.c, type = 'c')"
-  r:eval "rm(hd, adj, slope.c, speed.c)"
-  r:gc
+  r:eval "hd <- transition(elev, altDiff, 16, symm=F)"
+  r:eval "cell.targets <- Which(!is.na(elev), cells = T)"
+  r:eval "adj <- adjacent(elev, cells=cell.targets, target = cell.targets, pairs=TRUE, directions=16)"
+  r:eval "slope <- geoCorrection(hd)"
+  r:eval "speed <- slope"
+  r:eval "speed[adj] <- 6 * exp(-3.5 * abs(slope[adj] + 0.05))"
+  r:eval "Conductance <- geoCorrection(speed)"
 
   ask village 0 [
-    r:put "points" list xcor ycor
-    r:eval "acc <- accCost(Conductance.c, points)"
+    r:put "pts" ifelse-value dev-mode?
+      [ list xcor ycor ]
+      [ list item 0 gis:envelope-of self item 2 gis:envelope-of self ]
+    r:eval "acc <- accCost(Conductance, pts)"
+    r:eval "acc <- acc / 3600"
+    ;r:eval "acc[acc > 1.5] <- NA"
     r:eval "plot(acc)"
+    r:eval "rowcols <- rowColFromCell(acc, Which(acc < 1, cells = T))"
+    r:eval "rowcols[,2] <- rowcols[,2] - 1"
+    r:eval "rowcols[,1] <- rowcols[,1] * -1 + max(rowcols[,1])"
+    set farm-catchment patches-at-coords r:get "as.list(data.frame(t(rowcols)))"
   ]
+
+  r:eval "rm(elev, altDiff, acc, pts, Conductance.c, hd, adj, slope.c, speed.c)"
+  r:gc
+end
+
+to-report patches-at-coords [ coordinates ]
+  report (patch-set map [i -> patch last i first i] coordinates)
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -572,9 +592,9 @@ NIL
 
 SLIDER
 9
-132
+108
 181
-165
+141
 init-households
 init-households
 0
@@ -586,10 +606,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-14
-606
-214
-639
+5
+656
+205
+689
 grain-req
 grain-req
 140
@@ -602,14 +622,14 @@ HORIZONTAL
 
 SLIDER
 10
-463
+439
 177
-496
+472
 mean-precip
 mean-precip
 .14
 1
-0.24
+0.6
 .01
 1
 m
@@ -635,9 +655,9 @@ PENS
 
 CHOOSER
 7
-238
+214
 145
-283
+259
 tenure
 tenure
 "none" "satisficing" "maximizing"
@@ -666,9 +686,9 @@ PENS
 
 SLIDER
 8
-289
+265
 180
-322
+298
 tenure-drop
 tenure-drop
 .1
@@ -697,25 +717,25 @@ false
 PENS
 
 SLIDER
-15
-642
-225
-675
+6
+692
+216
+725
 wood-req
 wood-req
 1600
 4300
-2000.0
+1600.0
 10
 1
 kg/person
 HORIZONTAL
 
 SWITCH
-129
-686
-284
-719
+120
+736
+275
+769
 dynamic-pop?
 dynamic-pop?
 1
@@ -723,10 +743,10 @@ dynamic-pop?
 -1000
 
 CHOOSER
-17
-680
-127
-725
+8
+730
+118
+775
 patches-per-ha
 patches-per-ha
 0.25 0.5 1 1.25 2 4 6 10 16
@@ -734,9 +754,9 @@ patches-per-ha
 
 SLIDER
 8
-329
+305
 198
-362
+338
 expectation-scalar
 expectation-scalar
 0
@@ -767,9 +787,9 @@ PENS
 
 SLIDER
 8
-169
+145
 180
-202
+178
 init-villages
 init-villages
 0
@@ -782,9 +802,9 @@ HORIZONTAL
 
 SWITCH
 10
-95
+71
 187
-128
+104
 dev-mode?
 dev-mode?
 1
@@ -793,9 +813,9 @@ dev-mode?
 
 TEXTBOX
 10
-69
+45
 160
-87
+63
 Basic setup
 12
 0.0
@@ -803,19 +823,19 @@ Basic setup
 
 TEXTBOX
 24
-216
+192
 174
-234
+210
 Land tenure
 12
 0.0
 1
 
 TEXTBOX
-17
-586
-167
-604
+8
+636
+158
+654
 Constants
 12
 0.0
@@ -823,9 +843,9 @@ Constants
 
 SWITCH
 11
-367
+343
 144
-400
+376
 fixed-land?
 fixed-land?
 1
@@ -852,9 +872,9 @@ PENS
 
 TEXTBOX
 11
-412
+388
 161
-430
+406
 Weather
 12
 0.0
@@ -862,9 +882,9 @@ Weather
 
 SLIDER
 10
-498
+474
 182
-531
+507
 precip-CV
 precip-CV
 0
@@ -877,9 +897,9 @@ HORIZONTAL
 
 SWITCH
 10
-428
+404
 181
-461
+437
 stochastic-rain?
 stochastic-rain?
 0
@@ -888,24 +908,24 @@ stochastic-rain?
 
 SLIDER
 9
-533
+509
 181
-566
+542
 persistence
 persistence
 0
 1
-0.5
+0.0
 .1
 1
 NIL
 HORIZONTAL
 
 SLIDER
-928
-29
-1100
-62
+13
+549
+185
+582
 yield-memory-length
 yield-memory-length
 1
@@ -917,10 +937,10 @@ NIL
 HORIZONTAL
 
 CHOOSER
-932
-96
-1090
-141
+13
+589
+171
+634
 field-decision-strat
 field-decision-strat
 "random" "lowest" "average" "peak-end"

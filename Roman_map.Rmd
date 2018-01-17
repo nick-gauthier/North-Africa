@@ -184,10 +184,13 @@ ggplot(env, aes(x = key, y = value)) +
 
 ```{r eval=FALSE, include=FALSE}
 library(gdistance)
-
+srtm <- raster('data/netlogo/elev.asc')
+projection(srtm) <- '+proj=lcc +lat_1=43 +lat_2=62 +lat_0=30 +lon_0=10 +x_0=0 +y_0=0 +ellps=intl +units=m +no_defs'
+srtm
 altDiff <- function(x){x[2] - x[1]}
-hd <- transition(srtm, altDiff, 8, symm=FALSE)
-adj <- adjacent(srtm, cells=1:ncell(srtm), pairs=TRUE, directions=8)
+hd <- transition(srtm, altDiff, 16, symm=FALSE)
+cell.targets <- Which(!is.na(srtm), cells = T)
+adj <- adjacent(srtm, cells=cell.targets, target = cell.targets, pairs=TRUE, directions=16)
 ```
 
 Create conductance matrix with geocorrection for lcps
@@ -196,6 +199,12 @@ slope.c <- geoCorrection(hd, type = 'c')
 speed.c <- slope.c
 speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))
 Conductance.c <- geoCorrection(speed.c, type = 'c')
+
+test <- rowColFromCell(srtm, Which(srtm < 1000, cells = T))
+test[,2] <- test[,2] - 1
+test[,1] <- test[,1] * -1 + max(test[,1])
+test
+as.list(data.frame(t(test)))
 rm(slope.c, speed.c)
 ```
 
