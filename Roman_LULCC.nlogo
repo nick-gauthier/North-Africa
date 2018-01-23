@@ -446,8 +446,8 @@ end
 
 to remember
   ; store yield info in agent memory
-  let mean-yield mean [ patch-yield ] of farm-fields                ; calculate average patch crop yield
-  set fuzzy-yield-memory random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error;
+  let mean-yield ifelse-value (any? farm-fields) [mean [ patch-yield ] of farm-fields] [0]                ; calculate average patch crop yield
+  let fuzzy-yield-memory random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error;
   set yield-memory lput fuzzy-yield-memory yield-memory
   if (length yield-memory) > yield-memory-length                    ; comparing memory length to slider memory length input
   	[ set yield-memory remove-item 0 yield-memory ]
