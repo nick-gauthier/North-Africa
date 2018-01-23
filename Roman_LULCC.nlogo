@@ -50,10 +50,15 @@ globals [
   wood-gather-intensity       ; rate of wood gathering
   max-wood-dist               ; maximum distance household will travel to collect wood
 
-  birth-rate                  ; baseline birth rate for households
-  death-rate                  ; baseline death rate for households
+  base-birth-rate                  ; baseline birth rate for households
+  base-death-rate                  ; baseline death rate for households
+  min-birth-rate
+  max-birth-rate
+  min-death-rate
+  max-death-rate
   seed-prop                   ; proportion of harvests required for seeds
   starvation-threshold        ; births cease if fed-prop drops below starvation threshold
+  demographic-delta
 
   max-capita-labor            ; maximum hours of labor available per person in a household
   max-farm-dist               ; maximum distance a household will travel to farm a field
@@ -93,8 +98,13 @@ to setup
   set max-yield 3500                ; kg/ha
   set seed-prop .15                 ; agents reserve 15% of yields for seed
 
-  set birth-rate 0.054              ; initial birth rate
-  set death-rate 0.04               ; initial death rate
+  set base-birth-rate 0.066              ; initial birth rate
+  set base-death-rate 0.057               ; initial death rate
+  set max-birth-rate 0.2
+  set min-birth-rate 0.05
+  set max-death-rate 0.2
+  set min-death-rate 0.05
+  set demographic-delta 0.001
   set starvation-threshold 0.6      ; birth ceases if household has less than 60% of its food requirement
 
   set digestible-matter-req 894.25 ;kg/yr/head for awassi sheep, 584 for baladi goat
@@ -215,8 +225,8 @@ to setup-villages  ; create villages, then have each village create and initiali
       set fed-prop 1                           ; ditto
       set farm-fields no-patches               ; households don't own any farm fields
       set starve-count 0
-      set birth-prob 0.066
-      set death-prob 0.057
+      set birth-prob base-birth-rate
+      set death-prob base-death-rate
       ht  ; hide household turtles
     ]
 
@@ -437,10 +447,11 @@ end
 to remember
   ; store yield info in agent memory
   let mean-yield mean [ patch-yield ] of farm-fields                ; calculate average patch crop yield
-  set yield-memory lput mean-yield yield-memory
+  set fuzzy-yield-memory random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error;
+  set yield-memory lput fuzzy-yield-memory yield-memory
   if (length yield-memory) > yield-memory-length                    ; comparing memory length to slider memory length input
   	[ set yield-memory remove-item 0 yield-memory ]
-  ;set fuzzy-yield-memory random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error;
+
 end
 
 to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
@@ -463,7 +474,7 @@ to graze
   ; select grazing patches based on distance and vegetation type
   let graze-patches max-n-of (min list num-patches count (active-patches with [vegetation >= 9] in-radius 90)) (active-patches with [vegetation >= 9] in-radius 90) [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
   ask graze-patches [
-    remove-vegetation [ "graze" ]
+    remove-vegetation stocking-rate
     ;digestible-matter * stocking-rate / patches-per-ha
   ]
 end
@@ -496,16 +507,15 @@ to gather-wood  ; harvest firewood from vegetated patches
 
   ; select wood gathering patches based on distance and vegetation type
   let wood-patches max-n-of (min list num-patches count (active-patches with [vegetation >= 9] in-radius 90)) (active-patches with [vegetation >= 9] in-radius 90) [ wood-val ]
-  ask wood-patches [ remove-vegetation [ "wood-gather" ] ]
+  ask wood-patches [ remove-vegetation wood-gather-intensity ]
 end
 
 to-report wood-val
   report ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3)
 end
 
-to remove-vegetation [ activity-type ]
+to remove-vegetation [ intensity ]
   ; patches with different amounts of vegetation have different amounts of woody biomass available
-  let intensity ifelse-value (activity-type = "graze") [stocking-rate] [wood-gather-intensity]
   ifelse vegetation > 35
     [ set vegetation ((vegetation * .0806 - 2.08) - intensity + 2.08) / .0806 ]
     [ ifelse vegetation > 18
@@ -525,17 +535,38 @@ end
 
 to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
-    let deaths (random-poisson (death-rate * 100)) / 100 * occupants  ; death rate determined by poisson process
-    let births ifelse-value (fed-prop >= starvation-threshold)        ; births only occur if there is enough food, otherwise nothing happens
-      [ (random-poisson (birth-rate * 100)) / 100 * occupants ]
-      [ 0 ]
-    if (births - deaths != 0) [                  ; check to see if household size has changed
+    ifelse fed-prop < 1
+      [ ifelse fed-prop > 0.85
+          [ set birth-prob birth-prob - 0.5 * demographic-delta
+            set death-prob death-prob + 0.5 * demographic-delta ]
+          [ ifelse fed-prop > 0.75
+            [ set birth-prob birth-prob - (2 * demographic-delta) / 3
+              set death-prob death-prob + (2 * demographic-delta) / 3 ]
+            [ set birth-prob birth-prob - demographic-delta
+              set death-prob death-prob + demographic-delta ] ] ]
+      [ ifelse fed-prop < 1.15
+        [ set birth-prob birth-prob + 0.5 * demographic-delta
+          set death-prob death-prob - 0.5 * demographic-delta ]
+        [ ifelse fed-prop < 1.25
+          [ set birth-prob birth-prob + (2 * demographic-delta) / 3
+            set death-prob death-prob - (2 * demographic-delta) / 3 ]
+          [ set birth-prob birth-prob + demographic-delta
+            set death-prob death-prob - demographic-delta ] ] ]
+
+    if birth-prob > max-birth-rate [ set birth-prob max-birth-rate ]
+    if birth-prob < min-birth-rate [ set birth-prob min-birth-rate ]
+    if death-prob > max-death-rate [ set death-prob max-death-rate ]
+    if death-prob < min-death-rate [ set death-prob min-death-rate ]
+
+    let births random-binomial occupants birth-prob
+    let deaths random-binomial occupants death-prob
+
+    if births != deaths [
       set occupants occupants + births - deaths  ; adjust household size
       if occupants <= 0 [ die ]                  ; die if no one's left
-      set field-max floor (((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
+      set field-max floor ((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
     ]
   ]
-
   ; check to see if villages needs to grow
   ask villages [
     let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha) ; population to settled area determined by power law relationship
@@ -543,6 +574,9 @@ to birth-death   ; add or remove occupants from household, based on fed proporti
   ]
 end
 
+to-report random-binomial [n p]
+   report sum n-values n [ifelse-value (p > random-float 1) [1] [0]]
+end
 
 to adjust-settlement-size [patch-diff]  ; change settled area to reflect new village population
   ifelse patch-diff > 0            ; need to add or subtract settled patches?
@@ -745,7 +779,7 @@ CHOOSER
 tenure
 tenure
 "none" "satisficing" "maximizing"
-2
+1
 
 PLOT
 928
@@ -822,7 +856,7 @@ SWITCH
 769
 dynamic-pop?
 dynamic-pop?
-1
+0
 1
 -1000
 
@@ -986,7 +1020,7 @@ SWITCH
 437
 stochastic-rain?
 stochastic-rain?
-1
+0
 1
 -1000
 
