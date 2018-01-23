@@ -4,14 +4,16 @@ breed [ households household ]  ; basic agent type
 households-own [
   grain-supply       ; volume of grain held by household
   occupants          ; number of individuals in a household
-  babies             ; number of occupants that do not contribute to labor
   fed-prop           ; proportion of a household members receiving enough food
 
   farm-fields        ; list of patches used by household for farming
   field-max          ; maximum number of farm field patches a household can own, based on number of occupants
   yield-memory        ; average per-patch crop yields in agent memory
   field-yield-estimate ; yield per field estimate
+  graze-yield-estimate
   starve-count
+  birth-prob
+  death-prob
 ]
 
 breed [ villages village ]       ; collective of households, allows for selective coarse-graining
@@ -19,6 +21,9 @@ villages-own [
   settled-patches ; list of patches owned by a village but not farmed (i.e. occupied by village)
   farm-catchment
 ]
+
+breed [ cities city ]
+breed [ road-markers road-marker ]
 
 patches-own [
   vegetation   ; type of vegetation
@@ -54,11 +59,17 @@ globals [
   max-farm-dist               ; maximum distance a household will travel to farm a field
   max-yield                   ; maximum wheat yield given ideal conditions (kg)
 
+  digestible-matter-req       ; kg/yr/head
+  ovicaprid-per-person
+  stocking-rate               ; animals/ha
+
   relief-raster               ; GIS raster shaded relief terrain map, for visualization
   soils-raster                ; GIS raster of soil types
   acc-raster                  ; GIS raster of soil wetness (accumulation)
   cost-raster                 ; GIS raster of anisotropic LCPs from village locations
   slope-raster                ; GIS raster of terrain slope, reclassified based on impacts on arability
+  cities-dataset
+  roads-dataset
 ]
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -86,6 +97,10 @@ to setup
   set death-rate 0.04               ; initial death rate
   set starvation-threshold 0.6      ; birth ceases if household has less than 60% of its food requirement
 
+  set digestible-matter-req 894.25 ;kg/yr/head for awassi sheep, 584 for baladi goat
+  set ovicaprid-per-person 7     ; for 80/20 ratio, 17 for 50/50, 26 for 20/80
+  set stocking-rate 0.3          ; for intense, otherise 0.15
+
   if dev-mode? = False [setup-gis]      ; if diagnostic mode is off, import gis data
   setup-patches                               ; patch-specific setup procedures
   setup-villages                              ; village and household setup procedures
@@ -98,6 +113,7 @@ end
 
 to setup-gis
   ; load GIS raster maps
+  gis:load-coordinate-system "data/netlogo/elev.prj"
   set slope-raster gis:load-dataset "data/netlogo/slope.asc"
   set relief-raster gis:load-dataset "data/netlogo/relief.asc"
 
@@ -111,6 +127,39 @@ to setup-gis
   gis:apply-raster slope-raster slope-val
   gis:paint relief-raster 200  ; use hillshade map to visualize terrain
 
+  set cities-dataset gis:load-dataset "data/test.shp"
+  set roads-dataset gis:load-dataset "data/NA_roads.shp"
+
+    foreach gis:feature-list-of cities-dataset [ vector-feature ->
+  ; a feature in a point dataset may have multiple points, so we have a list of lists of points, which is why we need to use first twice here
+       let location gis:location-of (first (first (gis:vertex-lists-of vector-feature)))
+       if not empty? location
+       [ create-cities 1
+         [ set xcor item 0 location
+           set ycor item 1 location
+        set shape "circle"
+        set size 10
+         ]
+       ]
+  ]
+
+   gis:set-drawing-color blue
+ gis:draw roads-dataset 1
+  foreach gis:feature-list-of roads-dataset [ vector-feature ->
+      let centroid gis:location-of gis:centroid-of vector-feature
+       ; centroid will be an empty list if it lies outside the bounds
+       ; of the current NetLogo world, as defined by our current GIS
+       ; coordinate transformation
+       if not empty? centroid
+       [ create-road-markers 1
+          [ set xcor item 0 centroid
+             set ycor item 1 centroid
+             hide-turtle
+             set label gis:property-value vector-feature "NAME"
+           ]
+       ]
+     ]
+
   ;placeholders for other gis variables not yet fully implemented
   ;set cost-raster gis:load-dataset "cost.asc"
   ;set soils-raster gis:load-dataset "soils.asc"
@@ -119,6 +168,7 @@ to setup-gis
   ;gis:apply-raster acc-raster wetness
   ;gis:apply-raster cost-raster cost
 end
+
 
 
 to setup-patches
@@ -158,13 +208,15 @@ to setup-villages  ; create villages, then have each village create and initiali
     ; villages create households and initialize them
     hatch-households init-households [
      ; initialize household variables related to food production
-      set yield-memory (list [yield "wheat"] of one-of active-patches in-radius 5 with [fertility > 0])  ; give household initial rough estimate of potential crop yields
+      set yield-memory (list 1000)  ; give household initial rough estimate of potential crop yields
+      set graze-yield-estimate 250 / patches-per-ha
       set occupants 6                          ; households start off with 6 occupants
-      set babies 0                             ; households start off with no babies
       set grain-supply occupants * grain-req   ; households start with enough food to feed its occupants
       set fed-prop 1                           ; ditto
       set farm-fields no-patches               ; households don't own any farm fields
       set starve-count 0
+      set birth-prob 0.066
+      set death-prob 0.057
       ht  ; hide household turtles
     ]
 
@@ -184,7 +236,7 @@ end
 to setup-households
   ask households [
       ; households figure out how many fields they can farm, and acquire that number or fewer fields
-      set field-max floor ((occupants * max-capita-labor) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
+      set field-max floor ((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
       choose-farmland min list ((random 10) + 1) field-max                        ; households start with a random number of fields below this maximum
     ]
 end
@@ -209,16 +261,14 @@ to setup-r
   r:eval "speed[adj] <- 6 * exp(-3.5 * abs(slope[adj] + 0.05))"
   r:eval "Conductance <- geoCorrection(speed)"
 
-  ask village 0 [
+  ask villages [
     r:put "pts" ifelse-value dev-mode?
       [ list xcor ycor ]
       [ list item 0 gis:envelope-of self item 2 gis:envelope-of self ]
     r:eval "acc <- accCost(Conductance, pts)"
     r:eval "acc <- acc / 3600"
-    ;r:eval "acc[acc > 1.5] <- NA"
-    r:eval "plot(acc)"
     r:eval "rowcols <- rowColFromCell(acc, Which(acc < 1, cells = T))"
-    r:eval "rowcols[,2] <- rowcols[,2] - 1"
+    r:eval "rowcols[,2] <- rowcols[,2]  -1"
     r:eval "rowcols[,1] <- rowcols[,1] * -1 + max(rowcols[,1])"
     set farm-catchment patches-at-coords r:get "as.list(data.frame(t(rowcols)))"
   ]
@@ -250,8 +300,7 @@ to go
   if stochastic-rain? [ rain ]         ; generate annual precipitation as a stochastic process
   storage-decay                        ; decay food in storage
 
-  ask households [ farm ]              ; each household farms and gathers wood in turn
-  if dev-mode? = FALSE [ ask households [ gather-wood ] ]
+  ask households [ farm graze gather-wood]              ; each household farms and gathers wood in turn
 
   if dynamic-pop? [birth-death]        ; allow households to grow and die if dynamic-pop? is turned on
   regrow-patch                         ; regenerate vegetation and soil fertility
@@ -295,9 +344,6 @@ to calculate-field-yield ; household calculates the field number needed from the
   if field-decision-strat = "peak-end" [
     set field-yield-estimate (mean list (min yield-memory) (last yield-memory))
   ]
-  ; if field-decision-strat = "gambler's fallacy" [ ; to be implemented
-  ;  set field-yield-estimate ( ) ]
-
 end
 
 
@@ -332,14 +378,12 @@ to drop-farmland [num-fields]  ; routine that drops a given number of fields acc
   ask drop-fields [       ; routine for resotring dropped farm fields to their "natural" state
     set owner nobody      ; unfarmed fields have no owner
     set patch-yield 0     ; unfarmed fields have no crop yields
-    set field? FALSE     ; no longer a field
+    set field? FALSE      ; no longer a field
     set pcolor veg-color  ; update patch color to vegetation
   ]
 
   set farm-fields farm-fields with [owner = myself]  ; update the household's list of fields it owns
 end
-
-
 
 
 to choose-farmland [num-fields]   ; routine for a household to evaluate nearby patches and select new farm fields
@@ -377,22 +421,17 @@ to farm ; agents harvest food from patch and feed occupants
         set fertility (fertility - random-normal 3 2) ]  ; reduce fertility of farmed patch
       [ set patch-yield 0 ]                              ; no yields if not fertile
     if fertility < 0 [ set fertility 0 ]                   ; fertility can't be negative
-    ;set pcolor 39 - (8 * fertility / 100)                ; adjust patch color to reflect soil fertility
    ]
 
   ; harvest grain, store it, and feed the household
   let total-harvest sum [patch-yield] of farm-fields                             ; combine yields from all farmed patches
-  if ticks > 25 [
-    if total-harvest < (grain-req * occupants * (1 + seed-prop)) [
-      set starve-count starve-count + 1
-    ]
-  ]
+
   set grain-supply grain-supply + total-harvest * (1 - seed-prop)     ; store what's left after removing some grain for seed
   set fed-prop grain-supply / (grain-req * occupants)                 ; what proportion of household is able to be fed?
   set grain-supply max list 0 (grain-supply - grain-req * occupants)  ; subtract consumed food from storage without going negative
 
   remember
-
+  ask farm-fields [set patch-yield 0]
 end
 
 to remember
@@ -415,6 +454,40 @@ end
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Grazing                                                                                                             ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to graze
+  let num-patches round(occupants * ovicaprid-per-person * digestible-matter-req / graze-yield-estimate)  ; determine the number of patches a houshold needs to get wood from
+
+  ; select grazing patches based on distance and vegetation type
+  let graze-patches max-n-of (min list num-patches count (active-patches with [vegetation >= 9] in-radius 90)) (active-patches with [vegetation >= 9] in-radius 90) [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
+  ask graze-patches [
+    remove-vegetation [ "graze" ]
+    ;digestible-matter * stocking-rate / patches-per-ha
+  ]
+end
+
+to-report graze-val
+  let veg-val (ifelse-value (vegetation > 40) [ 80 - vegetation ] [ vegetation ]) / 40
+  report (veg-val + (1 - (distance myself / max-wood-dist))) / (2)
+end
+
+to-report digestible-matter
+  report ifelse-value (vegetation >= 40)
+           [ 800 - 10 * vegetation ]
+           [ ifelse-value (vegetation >= 27)
+             [ 27.27 * vegetation - 663.64 ]
+             [ ifelse-value (vegetation >= 4)
+               [ 2.27 * vegetation + 38.64 ]
+               [ ifelse-value (vegetation >= 1)
+                 [ 12.5 * vegetation ]
+                 [ 0 ] ] ] ]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Wood gathering                                                                                                      ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -422,24 +495,36 @@ to gather-wood  ; harvest firewood from vegetated patches
   let num-patches round(wood-req * occupants ^ 0.8 / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
 
   ; select wood gathering patches based on distance and vegetation type
-  let wood-patches max-n-of (min list num-patches count (active-patches with [vegetation >= 9] in-radius 90)) (active-patches with [vegetation >= 9] in-radius 90) [ ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3) ]
-  ask wood-patches [   ; patches with different amounts of vegetation have different amounts of woody biomass available
-      ifelse vegetation > 35
-      [ set vegetation ((vegetation * .0806 - 2.08) - wood-gather-intensity + 2.08) / .0806 ]
-      [ ifelse vegetation > 18
-        [ set vegetation ((vegetation * .0047 + .5755) - wood-gather-intensity - .5755) / .0047 ]
-        [ set vegetation ((vegetation * .0509 - .2562) - wood-gather-intensity + .2562) / .0509 ]]
-      if vegetation < 0 [ set vegetation 0 ]
-  ]
+  let wood-patches max-n-of (min list num-patches count (active-patches with [vegetation >= 9] in-radius 90)) (active-patches with [vegetation >= 9] in-radius 90) [ wood-val ]
+  ask wood-patches [ remove-vegetation [ "wood-gather" ] ]
 end
 
+to-report wood-val
+  report ((vegetation - 9) / 41 + (3 * (1 - (distance myself / max-wood-dist)))) / (1 + 3)
+end
+
+to remove-vegetation [ activity-type ]
+  ; patches with different amounts of vegetation have different amounts of woody biomass available
+  let intensity ifelse-value (activity-type = "graze") [stocking-rate] [wood-gather-intensity]
+  ifelse vegetation > 35
+    [ set vegetation ((vegetation * .0806 - 2.08) - intensity + 2.08) / .0806 ]
+    [ ifelse vegetation > 18
+      [ set vegetation ((vegetation * .0047 + .5755) - intensity - .5755) / .0047 ]
+      [ set vegetation ((vegetation * .0509 - .2562) - intensity + .2562) / .0509 ]
+    ]
+
+  if vegetation < 0 [ set vegetation 0 ]
+end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Demography                                                                                                          ;
+; Demography and food consumption                                                                                     ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to eat
+
+end
 
 to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
-    if ticks mod 15 = 0 [ set babies 0 ]        ; babies turn to laborers every 15 years
     let deaths (random-poisson (death-rate * 100)) / 100 * occupants  ; death rate determined by poisson process
     let births ifelse-value (fed-prop >= starvation-threshold)        ; births only occur if there is enough food, otherwise nothing happens
       [ (random-poisson (birth-rate * 100)) / 100 * occupants ]
@@ -447,8 +532,7 @@ to birth-death   ; add or remove occupants from household, based on fed proporti
     if (births - deaths != 0) [                  ; check to see if household size has changed
       set occupants occupants + births - deaths  ; adjust household size
       if occupants <= 0 [ die ]                  ; die if no one's left
-      set babies babies + births                 ; increase babies if any births occurred
-      set field-max floor (((occupants - babies) * max-capita-labor) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
+      set field-max floor (((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
     ]
   ]
 
@@ -515,11 +599,11 @@ end
 GRAPHICS-WINDOW
 286
 10
-1340
-564
+900
+625
 -1
 -1
-1.0
+6.0
 1
 10
 1
@@ -530,13 +614,13 @@ GRAPHICS-WINDOW
 0
 1
 0
-1045
+100
 0
-544
+100
 1
 1
 1
-ticks
+year
 30.0
 
 BUTTON
@@ -599,7 +683,7 @@ init-households
 init-households
 0
 50
-5.0
+3.0
 1
 1
 NIL
@@ -661,7 +745,7 @@ CHOOSER
 tenure
 tenure
 "none" "satisficing" "maximizing"
-1
+2
 
 PLOT
 928
@@ -725,7 +809,7 @@ wood-req
 wood-req
 1600
 4300
-1600.0
+2000.0
 10
 1
 kg/person
@@ -778,7 +862,7 @@ NIL
 0.0
 10.0
 0.0
-10.0
+1.0
 true
 false
 "" ""
@@ -794,7 +878,7 @@ init-villages
 init-villages
 0
 30
-3.0
+1.0
 1
 1
 NIL
@@ -807,7 +891,7 @@ SWITCH
 104
 dev-mode?
 dev-mode?
-1
+0
 1
 -1000
 
@@ -889,7 +973,7 @@ precip-CV
 precip-CV
 0
 .9
-0.0
+0.3
 .1
 1
 NIL
@@ -902,7 +986,7 @@ SWITCH
 437
 stochastic-rain?
 stochastic-rain?
-0
+1
 1
 -1000
 
