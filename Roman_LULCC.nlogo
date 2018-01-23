@@ -79,7 +79,7 @@ to setup
   set max-wood-dist 300             ; 300 patch wood gather distance, alternatives -> 150 * sqrt(patches-per-ha) ; 4 * 60 * 60
 
   set patches-per-m2 patches-per-ha / 10000   ; simple coversion from hectares to m2
-  set max-yield 3500 / patches-per-ha         ; convert max yield to mass per unit area
+  set max-yield 3500                ; kg/ha
   set seed-prop .15                 ; agents reserve 15% of yields for seed
 
   set birth-rate 0.054              ; initial birth rate
