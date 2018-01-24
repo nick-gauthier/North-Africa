@@ -292,7 +292,7 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to go
-  if stochastic-rain? [ rain ]         ; generate annual precipitation as a stochastic process
+  rain        ; generate annual precipitation as a stochastic process
   storage-decay                        ; decay food in storage
 
 
