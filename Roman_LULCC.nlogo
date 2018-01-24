@@ -10,7 +10,7 @@ households-own [
   field-max          ; maximum number of farm field patches a household can own, based on number of occupants
   yield-memory        ; average per-patch crop yields in agent memory
   field-yield-estimate ; yield per field estimate
-  graze-yield-estimate
+
   starve-count
   birth-prob
   death-prob
@@ -22,6 +22,7 @@ villages-own [
   farm-catchment
   graze-catchment
   cost-raster
+  graze-yield-estimate
 ]
 
 breed [ cities city ]
@@ -93,8 +94,8 @@ to setup
 
   set max-capita-labor 250          ; an individual works 250 days out of the year
 
-  set max-farm-dist 1             ; 1 hr
-  set max-graze-dist 4             ; 4 hr
+  set max-farm-dist .5             ; 1 hr
+  set max-graze-dist 3             ; 4 hr
 
   set patches-per-m2 patches-per-ha / 10000   ; simple coversion from hectares to m2
   set max-yield 3500                ; kg/ha
@@ -216,12 +217,14 @@ to setup-villages  ; create villages, then have each village create and initiali
       [ move-to patch 49 49 ]
     [ move-to one-of active-patches with [ slope-val  >= 0.75 ] ] ; move villages to random locations
 
+
+    set graze-yield-estimate 250 / patches-per-ha
+
     ; villages create households and initialize them
     hatch-households init-households [
      ; initialize household variables related to food production
-      set yield-memory (list [yield "wheat"] of one-of patches in-radius 4)  ; give household initial rough estimate of potential crop yields
-      set graze-yield-estimate 250 / patches-per-ha
-      set occupants 6                          ; households start off with 6 occupants
+      set yield-memory (list mean [yield "wheat"] of patches in-radius 2)  ; give household initial rough estimate of potential crop yields
+      set occupants 6    ; households start off with 6 occupants
       set field-max floor ((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
       set farm-fields no-patches
       set birth-prob base-birth-rate
@@ -295,16 +298,15 @@ to go
   rain        ; generate annual precipitation as a stochastic process
   storage-decay                        ; decay food in storage
 
-
   ask villages [
    gis:apply-raster cost-raster cost
-   ask households [ calculate-field-yield check-farmland farm ]              ; each household farms and gathers wood in turn
-    ;ask households [ graze ]
-    ;ask households [ gather-wood]
+   ask households [ calculate-field-yield
+      check-farmland
+      farm ]              ; each household farms and gathers wood in turn
+    graze
+    gather-wood
     ask active-patches [ set cost 0 ]
   ]
-
-
 
   if dynamic-pop? [birth-death]        ; allow households to grow and die if dynamic-pop? is turned on
   regrow-patch                         ; regenerate vegetation and soil fertility
@@ -407,9 +409,9 @@ end
 
 to-report farm-val  ; decision algorithm to assign value to patches with low slopes, high fertility, and less vegetation that are closer to the village
   let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100  ; agents prefer certain vegetation types
-  let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented one
+  ;let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented one
 
-  report slope-val * (fertility / 100 - ((cost / max-farm-dist) + lcdeval + frag-val) / 3)
+  report slope-val * (fertility / 100 - ((cost / max-farm-dist) + lcdeval) / 2) ;+ frag-val) / 3)
 end
 
 
@@ -465,10 +467,10 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to graze
-  let num-patches round(occupants * ovicaprid-per-person * digestible-matter-req / graze-yield-estimate)  ; determine the number of patches a houshold needs to get wood from
+  let num-patches round((sum [occupants] of households-here) * ovicaprid-per-person * digestible-matter-req / graze-yield-estimate)  ; determine the number of patches a houshold needs to get wood from
 
   ; select grazing patches based on distance and vegetation type
-  let graze-patches max-n-of num-patches ([graze-catchment] of myself) with [owner = nobody] [ graze-val ]
+  let graze-patches max-n-of num-patches graze-catchment with [owner = nobody] [ graze-val ]
   ask graze-patches [
     remove-vegetation stocking-rate
     ;digestible-matter * stocking-rate / patches-per-ha
@@ -477,7 +479,7 @@ end
 
 to-report graze-val
   let veg-val (ifelse-value (vegetation > 40) [ 80 - vegetation ] [ vegetation ]) / 40
-  report (veg-val + (1 - (cost / max-graze-dist))) / (2)
+  report (veg-val + (1 - (cost / max-graze-dist))) / 2
 end
 
 to-report digestible-matter
@@ -489,7 +491,10 @@ to-report digestible-matter
                [ 2.27 * vegetation + 38.64 ]
                [ ifelse-value (vegetation >= 1)
                  [ 12.5 * vegetation ]
-                 [ 0 ] ] ] ]
+                 [ 0 ]
+               ]
+             ]
+           ]
 end
 
 
@@ -499,10 +504,10 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to gather-wood  ; harvest firewood from vegetated patches
-  let num-patches round(wood-req * occupants ^ 0.8 / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
+  let num-patches round(wood-req * (sum [occupants] of households-here) ^ 0.8 / (wood-gather-intensity / patches-per-m2))  ; determine the number of patches a houshold needs to get wood from
 
   ; select wood gathering patches based on distance and vegetation type
-  let wood-patches max-n-of num-patches ([graze-catchment] of myself) with [owner = nobody and vegetation >= 9] [ wood-val ]
+  let wood-patches max-n-of num-patches graze-catchment with [owner = nobody and vegetation >= 9] [ wood-val ]
   ask wood-patches [ remove-vegetation wood-gather-intensity ]
 end
 
@@ -705,10 +710,10 @@ NIL
 1
 
 SLIDER
-9
-108
-181
-141
+8
+87
+145
+120
 init-households
 init-households
 0
@@ -720,10 +725,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-0
-608
-200
-641
+9
+571
+197
+604
 grain-req
 grain-req
 140
@@ -735,10 +740,10 @@ kg/person
 HORIZONTAL
 
 SLIDER
-5
-391
-172
-424
+8
+291
+155
+324
 mean-precip
 mean-precip
 .14
@@ -768,10 +773,10 @@ PENS
 "pen-0" 1.0 0 -3844592 true "" "plot mean [grain-supply] of households"
 
 CHOOSER
-7
-214
-145
-259
+4
+166
+142
+211
 tenure
 tenure
 "none" "satisficing" "maximizing"
@@ -799,10 +804,10 @@ PENS
 "shrub and grassland" 1.0 0 -4399183 true "" "plot (count patches with [vegetation < 18]) * 100 / count patches"
 
 SLIDER
-8
-265
-180
-298
+146
+171
+274
+204
 tenure-drop
 tenure-drop
 .1
@@ -827,14 +832,15 @@ NIL
 10.0
 true
 false
-"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks occupants\n]"
+"" ""
 PENS
+"pen-0" 1.0 0 -7500403 true "" "plot sum [occupants] of households"
 
 SLIDER
-1
-644
-211
-677
+10
+607
+201
+640
 wood-req
 wood-req
 1600
@@ -846,10 +852,10 @@ kg/person
 HORIZONTAL
 
 SWITCH
-115
-688
-270
-721
+140
+480
+279
+513
 dynamic-pop?
 dynamic-pop?
 0
@@ -857,20 +863,20 @@ dynamic-pop?
 -1000
 
 CHOOSER
-3
-682
-113
-727
+12
+645
+122
+690
 patches-per-ha
 patches-per-ha
 0.25 0.5 1 1.25 2 4 6 10 16
 3
 
 SLIDER
-8
-305
-198
-338
+4
+214
+174
+247
 expectation-scalar
 expectation-scalar
 0
@@ -900,10 +906,10 @@ PENS
 "default" 1.0 0 -16777216 true "" "plot mean [fertility] of patches with [owner != nobody]"
 
 SLIDER
-8
-145
-180
-178
+155
+88
+268
+121
 init-villages
 init-villages
 0
@@ -915,10 +921,10 @@ NIL
 HORIZONTAL
 
 SWITCH
-10
-71
-187
-104
+11
+481
+137
+514
 dev-mode?
 dev-mode?
 1
@@ -927,29 +933,29 @@ dev-mode?
 
 TEXTBOX
 10
-45
+67
 160
-63
+85
 Basic setup
 12
 0.0
 1
 
 TEXTBOX
-24
-192
-174
-210
+5
+148
+155
+166
 Land tenure
 12
 0.0
 1
 
 TEXTBOX
-3
-588
-153
-606
+12
+551
+162
+569
 Constants
 12
 0.0
@@ -974,20 +980,20 @@ PENS
 "default" 1.0 0 -16777216 true "" "plot annual-precip"
 
 TEXTBOX
-6
-340
-156
-358
+8
+267
+158
+285
 Weather
 12
 0.0
 1
 
 SLIDER
-5
-426
-177
-459
+8
+326
+128
+359
 precip-CV
 precip-CV
 0
@@ -998,22 +1004,11 @@ precip-CV
 NIL
 HORIZONTAL
 
-SWITCH
-5
-356
-176
-389
-stochastic-rain?
-stochastic-rain?
-0
-1
--1000
-
 SLIDER
-4
-461
-176
-494
+143
+326
+264
+359
 persistence
 persistence
 0
@@ -1025,10 +1020,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-8
-501
-180
-534
+6
+367
+178
+400
 yield-memory-length
 yield-memory-length
 1
@@ -1040,10 +1035,10 @@ NIL
 HORIZONTAL
 
 CHOOSER
-8
-541
-166
-586
+5
+409
+163
+454
 field-decision-strat
 field-decision-strat
 "random" "lowest" "average" "peak-end"
