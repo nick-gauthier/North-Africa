@@ -2,9 +2,9 @@ extensions [ table ]
 
 breed [ individuals individual ]
 
-individuals-own [ age sex ]
+individuals-own [ age sex offspring max-offspring]
 
-globals [ fertility-table mortality-male mortality-female ]
+globals [ fertility-table mortality-table mortality-male mortality-female ]
 
 to setup
   ca
@@ -21,11 +21,13 @@ end
 to setup-individuals
     ht
     set age 0
+    set offspring 0
+    set max-offspring 7
     set sex ifelse-value (0.5 > random-float 1) ["male"] ["female"]
 end
 
 to go
-  ask individuals with [ (sex = "female") and (age >= 12) and (age < 50) ] [
+  ask individuals with [ (sex = "female") and (age >= 12) and (age < 50) and (offspring < max-offspring)] [
     check-birth
    ]
 
@@ -43,15 +45,17 @@ to check-birth
 
   if fertility-rate > random-float 1 [
     hatch 1 [ setup-individuals ]
+    set offspring offspring + 1
   ]
 end
 
 to check-death
   let mortality-rate 0
-  ifelse sex = "male"
-    [ set mortality-rate table:get mortality-male age-to-ageclass ]
-    [ set mortality-rate table:get mortality-female age-to-ageclass ]
-
+  ;ifelse sex = "male"
+  ;  [ set mortality-rate table:get mortality-male age-to-ageclass ]
+  ;  [ set mortality-rate table:get mortality-female age-to-ageclass ]
+  set mortality-rate table:get mortality-table age-to-ageclass
+  if famine [ set mortality-rate mortality-rate * 2 ]
   if mortality-rate > random-float 1 [ die ]
 end
 
@@ -61,19 +65,21 @@ to-report age-to-ageclass
     [ report age ]
     [ ifelse age < 5
       [ report 1 ]
-    [ report floor (age / 5) * 5 ]]
+    [ ifelse age > 80
+      [report 80]
+      [report floor (age / 5) * 5 ]]]
 end
 
 to make-fertility-table
   set fertility-table table:make
-  table:put fertility-table 10 0.023
-  table:put fertility-table 15 0.249
-  table:put fertility-table 20 0.333
-  table:put fertility-table 25 0.325
-  table:put fertility-table 30 0.299
-  table:put fertility-table 35 0.262
-  table:put fertility-table 40 0.166
-  table:put fertility-table 45 0.037
+  table:put fertility-table 10 0.022
+  table:put fertility-table 15 0.232
+  table:put fertility-table 20 0.343
+  table:put fertility-table 25 0.367
+  table:put fertility-table 30 0.293
+  table:put fertility-table 35 0.218
+  table:put fertility-table 40 0.216
+  table:put fertility-table 45 0.134
 end
 
 to make-mortality-table
@@ -122,16 +128,36 @@ to make-mortality-table
   table:put mortality-male 85 0.8814
   table:put mortality-male 90 0.9578
   table:put mortality-male 95 1.0000
+
+  set mortality-table table:make
+  table:put mortality-table 0 0.4669
+  table:put mortality-table 1 0.0702
+  table:put mortality-table 5 0.0132
+  table:put mortality-table 10 0.0099
+  table:put mortality-table 15 0.0154
+  table:put mortality-table 20 0.0172
+  table:put mortality-table 25 0.0195	
+  table:put mortality-table 30 0.0223
+  table:put mortality-table 35 0.0259
+  table:put mortality-table 40 0.0306
+  table:put mortality-table 45 0.0373
+  table:put mortality-table 50 0.0473
+  table:put mortality-table 55 0.0573
+  table:put mortality-table 60 0.0784
+  table:put mortality-table 65 0.1042
+  table:put mortality-table 70 0.1434
+  table:put mortality-table 75 0.2039
+  table:put mortality-table 80 0.2654	
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
 629
 426
-649
-447
+662
+460
 -1
 -1
-6.0
+12.5
 1
 10
 1
@@ -201,10 +227,10 @@ NIL
 HORIZONTAL
 
 PLOT
-123
-190
-476
-425
+210
+221
+563
+456
 plot 1
 NIL
 NIL
@@ -237,10 +263,10 @@ NIL
 1
 
 PLOT
-262
-17
-462
-167
+212
+44
+562
+217
 plot 2
 NIL
 NIL
@@ -253,6 +279,17 @@ false
 "" ""
 PENS
 "default" 5.0 1 -16777216 true "" "histogram [age] of turtles"
+
+SWITCH
+21
+244
+126
+277
+famine
+famine
+1
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
