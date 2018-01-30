@@ -13,9 +13,8 @@ to setup
   make-fertility-table
   make-mortality-table
 
-  set growth-rate []
   create-individuals init-pop [ setup-individuals ]
-  ask individuals [ set age random 80 ]
+  ask individuals [ set age 20 ]; random 80 ]
 
   reset-ticks
 end
@@ -29,7 +28,7 @@ end
 
 to go
   set start-pop count individuals
-  ask individuals with [ (sex = "female") and (age >= 12) and (age < 50)] [
+  ask individuals with [ (sex = "female") and (age >= 12) and (age < 50) and (offspring < max-births)] [
     check-birth
    ]
 
@@ -39,15 +38,14 @@ to go
   ]
 
   set end-pop count individuals
-  set growth-rate lput ((end-pop - start-pop) / start-pop) growth-rate
+  set growth-rate (end-pop - start-pop) / start-pop
 
   if count individuals = 0 [ stop ]
   tick
 end
 
 to check-birth
-  let intrinsic-fertility table:get fertility-table age-to-ageclass
-  let fertility-rate intrinsic-fertility - (intrinsic-fertility - theta) * (count individuals) / carrying-capacity
+  let fertility-rate (table:get fertility-table age-to-ageclass) * (1 - start-pop / carrying-capacity)
   if fertility-rate > random-float 1 [
     hatch 1 [ setup-individuals ]
     set offspring offspring + 1
@@ -59,8 +57,7 @@ to check-death
   ;ifelse sex = "male"
   ;  [ set mortality-rate table:get mortality-male age-to-ageclass ]
   ;  [ set mortality-rate table:get mortality-female age-to-ageclass ]
-  let intrinsic-mortality table:get mortality-table age-to-ageclass
-  let mortality-rate intrinsic-mortality + (theta - intrinsic-mortality) * (count individuals) / carrying-capacity
+  let mortality-rate table:get mortality-table age-to-ageclass
   if mortality-rate > random-float 1 [ die ]
 end
 
@@ -156,13 +153,13 @@ to make-mortality-table
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-1057
-312
-1090
-346
+29
+380
+64
+416
 -1
 -1
-12.5
+13.5
 1
 10
 1
@@ -225,8 +222,8 @@ init-pop
 init-pop
 0
 10000
-1300.0
-100
+5096.0
+1
 1
 NIL
 HORIZONTAL
@@ -247,8 +244,7 @@ true
 true
 "" ""
 PENS
-"Males" 1.0 0 -13791810 true "" "plot count individuals with [sex = \"male\"]"
-"Females" 1.0 0 -2674135 true "" "plot count individuals with [sex = \"female\"]"
+"Population" 1.0 0 -13791810 true "" "plot count individuals"
 
 BUTTON
 17
@@ -285,46 +281,54 @@ false
 PENS
 "default" 5.0 1 -16777216 true "" "histogram [age] of turtles"
 
-MONITOR
-15
-218
-132
-263
-Growth rate (%)
-(mean growth-rate) * 100
-2
-1
-11
-
 SLIDER
-78
-481
-250
-514
-theta
-theta
-0
+14
+164
+186
+197
+max-births
+max-births
 1
-0.05
-.01
+20
+20.0
+1
 1
 NIL
 HORIZONTAL
 
 SLIDER
-99
-541
-278
-574
+24
+293
+203
+326
 carrying-capacity
 carrying-capacity
-1000
+1
 10000
-10000.0
-1000
+6101.0
+100
 1
 NIL
 HORIZONTAL
+
+PLOT
+651
+60
+1170
+419
+plot 1
+Time
+Growth rate
+0.0
+10.0
+-0.5
+0.5
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot growth-rate"
+"pen-1" 1.0 0 -7500403 true "" "\nauto-plot-off\nplotxy 0 0\nplotxy 1000000000 0\n\nauto-plot-on"
 
 @#$#@#$#@
 ## WHAT IS IT?

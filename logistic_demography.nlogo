@@ -156,10 +156,10 @@ to make-mortality-table
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-1057
-312
-1090
-346
+23
+337
+56
+371
 -1
 -1
 12.5

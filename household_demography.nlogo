@@ -1,168 +1,51 @@
-extensions [ table ]
-
-breed [ individuals individual ]
-
-individuals-own [ age sex offspring]
-
-globals [ fertility-table mortality-table mortality-male mortality-female growth-rate start-pop end-pop]
+breed [ households household ]
+households-own [ occupants ]
 
 to setup
   ca
   no-display
-
-  make-fertility-table
-  make-mortality-table
-
-  set growth-rate []
-  create-individuals init-pop [ setup-individuals ]
-  ask individuals [ set age random 80 ]
+  create-households init-households [
+    ht
+    set occupants init-occupants
+  ]
 
   reset-ticks
 end
 
-to setup-individuals
-    ht
-    set age 0
-    set offspring 0
-    set sex ifelse-value (0.5 > random-float 1) ["male"] ["female"]
-end
-
 to go
-  set start-pop count individuals
-  ask individuals with [ (sex = "female") and (age >= 12) and (age < 50)] [
-    check-birth
-   ]
-
-  ask individuals [
-    check-death
-    set age age + 1
+ ask households [
+    birth-death
   ]
-
-  set end-pop count individuals
-  set growth-rate lput ((end-pop - start-pop) / start-pop) growth-rate
-
-  if count individuals = 0 [ stop ]
+  if count households = 0 [ stop ]
   tick
 end
 
-to check-birth
-  let intrinsic-fertility table:get fertility-table age-to-ageclass
-  let fertility-rate intrinsic-fertility - (intrinsic-fertility - theta) * (count individuals) / carrying-capacity
-  if fertility-rate > random-float 1 [
-    hatch 1 [ setup-individuals ]
-    set offspring offspring + 1
-  ]
+
+to birth-death
+  let fertility-rate intrinsic-fertility - (intrinsic-fertility - theta) * occupants / carrying-capacity
+  let mortality-rate intrinsic-mortality + (theta - intrinsic-mortality) * occupants / carrying-capacity
+
+  let births random-binomial occupants fertility-rate
+  let deaths random-binomial occupants mortality-rate
+
+    if births != deaths [
+      set occupants occupants + births - deaths  ; adjust household size
+      if occupants <= 0 [ die ]                  ; die if no one's left
+   ]
 end
 
-to check-death
-  ;let mortality-rate 0
-  ;ifelse sex = "male"
-  ;  [ set mortality-rate table:get mortality-male age-to-ageclass ]
-  ;  [ set mortality-rate table:get mortality-female age-to-ageclass ]
-  let intrinsic-mortality table:get mortality-table age-to-ageclass
-  let mortality-rate intrinsic-mortality + (theta - intrinsic-mortality) * (count individuals) / carrying-capacity
-  if mortality-rate > random-float 1 [ die ]
-end
-
-
-to-report age-to-ageclass
-  ifelse age <= 1
-    [ report age ]
-    [ ifelse age < 5
-      [ report 1 ]
-    [ ifelse age > 80
-      [report 80]
-      [report floor (age / 5) * 5 ]]]
-end
-
-to make-fertility-table
-  set fertility-table table:make
-  table:put fertility-table 10 0.022
-  table:put fertility-table 15 0.232
-  table:put fertility-table 20 0.343
-  table:put fertility-table 25 0.367
-  table:put fertility-table 30 0.293
-  table:put fertility-table 35 0.218
-  table:put fertility-table 40 0.216
-  table:put fertility-table 45 0.134
-end
-
-to make-mortality-table
-  set mortality-female table:make
-  table:put mortality-female 0 0.3056
-  table:put mortality-female 1 0.2158
-  table:put mortality-female 5 0.0606
-  table:put mortality-female 10 0.0474
-  table:put mortality-female 15 0.0615
-  table:put mortality-female 20 0.0766
-  table:put mortality-female 25 0.0857
-  table:put mortality-female 30 0.0965
-  table:put mortality-female 35 0.1054
-  table:put mortality-female 40 0.1123
-  table:put mortality-female 45 0.1197
-  table:put mortality-female 50 0.1529
-  table:put mortality-female 55 0.1912
-  table:put mortality-female 60 0.2715
-  table:put mortality-female 65 0.3484
-  table:put mortality-female 70 0.4713
-  table:put mortality-female 75 0.6081
-  table:put mortality-female 80 0.7349
-  table:put mortality-female 85 0.8650
-  table:put mortality-female 90 0.9513
-  table:put mortality-female 95 1.0000
-
-  set mortality-male table:make
-  table:put mortality-male 0 0.3517
-  table:put mortality-male 1 0.2147
-  table:put mortality-male 5 0.0563
-  table:put mortality-male 10 0.0404
-  table:put mortality-male 15 0.0547
-  table:put mortality-male 20 0.0775
-  table:put mortality-male 25 0.0868	
-  table:put mortality-male 30 0.1002
-  table:put mortality-male 35 0.1168
-  table:put mortality-male 40 0.1397
-  table:put mortality-male 45 0.1597
-  table:put mortality-male 50 0.1981
-  table:put mortality-male 55 0.2354
-  table:put mortality-male 60 0.3091
-  table:put mortality-male 65 0.3921
-  table:put mortality-male 70 0.5040
-  table:put mortality-male 75 0.6495
-  table:put mortality-male 80 0.7623	
-  table:put mortality-male 85 0.8814
-  table:put mortality-male 90 0.9578
-  table:put mortality-male 95 1.0000
-
-  set mortality-table table:make
-  table:put mortality-table 0 0.4669
-  table:put mortality-table 1 0.0702
-  table:put mortality-table 5 0.0132
-  table:put mortality-table 10 0.0099
-  table:put mortality-table 15 0.0154
-  table:put mortality-table 20 0.0172
-  table:put mortality-table 25 0.0195	
-  table:put mortality-table 30 0.0223
-  table:put mortality-table 35 0.0259
-  table:put mortality-table 40 0.0306
-  table:put mortality-table 45 0.0373
-  table:put mortality-table 50 0.0473
-  table:put mortality-table 55 0.0573
-  table:put mortality-table 60 0.0784
-  table:put mortality-table 65 0.1042
-  table:put mortality-table 70 0.1434
-  table:put mortality-table 75 0.2039
-  table:put mortality-table 80 0.2654	
+to-report random-binomial [n p]
+   report sum n-values n [ifelse-value (p > random-float 1) [1] [0]]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-1057
-312
-1090
-346
+248
+322
+349
+424
 -1
 -1
-12.5
+46.5
 1
 10
 1
@@ -217,25 +100,25 @@ NIL
 1
 
 SLIDER
-11
-123
-183
-156
-init-pop
-init-pop
-0
-10000
-1300.0
-100
+25
+170
+203
+203
+init-occupants
+init-occupants
+1
+20
+4.0
+1
 1
 NIL
 HORIZONTAL
 
 PLOT
-210
-221
-563
-456
+306
+35
+659
+270
 Population
 Year
 Population
@@ -244,11 +127,9 @@ Population
 0.0
 10.0
 true
-true
-"" ""
+false
+"" "ask households [\n  create-temporary-plot-pen (word who)\n  set-plot-pen-color color\n  plotxy ticks occupants\n]"
 PENS
-"Males" 1.0 0 -13791810 true "" "plot count individuals with [sex = \"male\"]"
-"Females" 1.0 0 -2674135 true "" "plot count individuals with [sex = \"female\"]"
 
 BUTTON
 17
@@ -267,61 +148,77 @@ NIL
 NIL
 1
 
-PLOT
-212
-44
-562
-217
-Age distribution
-Age
-Count
-0.0
-100.0
-0.0
-10.0
-true
-false
-"" ""
-PENS
-"default" 5.0 1 -16777216 true "" "histogram [age] of turtles"
-
-MONITOR
-15
-218
-132
-263
-Growth rate (%)
-(mean growth-rate) * 100
-2
-1
-11
-
 SLIDER
-78
-481
-250
-514
+27
+302
+199
+335
 theta
 theta
-0
-1
-0.05
-.01
+intrinsic-mortality
+intrinsic-fertility
+0.061
+.001
 1
 NIL
 HORIZONTAL
 
 SLIDER
-99
-541
-278
-574
+28
+346
+207
+379
 carrying-capacity
 carrying-capacity
-1000
+1
+20
+18.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+26
+130
+198
+163
+init-households
+init-households
+1
 10000
-10000.0
-1000
+2171.0
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+29
+218
+201
+251
+intrinsic-fertility
+intrinsic-fertility
+intrinsic-mortality
+1
+0.066
+.001
+1
+NIL
+HORIZONTAL
+
+SLIDER
+27
+258
+207
+291
+intrinsic-mortality
+intrinsic-mortality
+0
+intrinsic-fertility
+0.057
+.001
 1
 NIL
 HORIZONTAL
