@@ -409,9 +409,9 @@ end
 
 to-report farm-val  ; decision algorithm to assign value to patches with low slopes, high fertility, and less vegetation that are closer to the village
   let lcdeval (ifelse-value (vegetation <= 30) [ vegetation * 25 / 30 ] [ vegetation * 65 / 20 - 72.5 ]) / 100  ; agents prefer certain vegetation types
-  ;let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented one
+  let frag-val 1 - (count neighbors with [owner = myself]) / 8     ; agents prefer continuous fields to fragmented one
 
-  report slope-val * (fertility / 100 - ((cost / max-farm-dist) + lcdeval) / 2) ;+ frag-val) / 3)
+  report slope-val * (fertility / 100 - ((cost / max-farm-dist) + lcdeval + frag-val) / 3)
 end
 
 
