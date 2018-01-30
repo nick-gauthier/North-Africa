@@ -74,6 +74,7 @@ globals [
   relief-raster               ; GIS raster shaded relief terrain map, for visualization
   soils-raster                ; GIS raster of soil types
   acc-raster                  ; GIS raster of soil wetness (accumulation)
+  lc-raster
   ;cost-raster                 ; GIS raster of anisotropic LCPs from village locations
   slope-raster                ; GIS raster of terrain slope, reclassified based on impacts on arability
   cities-dataset
@@ -112,9 +113,11 @@ to setup
 
   set digestible-matter-req 894.25 ;kg/yr/head for awassi sheep, 584 for baladi goat
   set ovicaprid-per-person 7     ; for 80/20 ratio, 17 for 50/50, 26 for 20/80
-  set stocking-rate 0.3          ; for intense, otherise 0.15
+  set stocking-rate 0.15          ; 0.3 for intense, otherise 0.15
 
-  if dev-mode? = False [setup-gis]      ; if diagnostic mode is off, import gis data
+  ifelse dev-mode?
+  [setup-landscape]
+    [setup-gis]      ; if diagnostic mode is off, import gis data
   setup-patches                               ; patch-specific setup procedures
   setup-villages                              ; village and household setup procedures
   setup-r
@@ -122,6 +125,17 @@ to setup
   reset-ticks
 end
 
+to setup-landscape
+  r:eval "library(NLMR)"
+  r:eval "library(raster)"
+  r:eval "land_cover <- nlm_randomcluster(100, 100, p = 0.5)"
+  r:eval "land_cover <- (util_classify(land_cover, c(0.5, 0.25, 0.25)) + 1) * 25"
+  r:put "outdir" (word pathdir:get-model-path "/data/netlogo/lc_tmp.asc")
+  r:eval "writeRaster(land_cover, outdir, overwrite = T)"
+  set lc-raster gis:load-dataset "data/netlogo/lc_tmp.asc"
+  gis:apply-raster lc-raster vegetation
+  ask patches [ ifelse (vegetation <= 0) or (vegetation >= 0) [] [ set vegetation 50 ]]
+end
 
 to setup-gis
   ; load GIS raster maps
@@ -186,8 +200,8 @@ end
 to setup-patches
   ; check if diagnostic mode is on. if so, setup a world with a uniform environment instead of using GIS data
   if dev-mode? [
-    resize-world 0 100 0 100    ; set world size and patch sizes to reasonable values for fast diagnostic runs
-    set-patch-size 6
+    resize-world 0 99 0 99    ; set world size and patch sizes to reasonable values for fast diagnostic runs
+    set-patch-size 5
   ]
 
   ; Now determine which patches are active in the simulation, or should be masked out of computations because they
@@ -226,6 +240,7 @@ to setup-villages  ; create villages, then have each village create and initiali
       set yield-memory (list mean [yield "wheat"] of patches in-radius 2)  ; give household initial rough estimate of potential crop yields
       set occupants 6    ; households start off with 6 occupants
       set field-max floor ((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
+      set grain-supply grain-req * occupants
       set farm-fields no-patches
       set birth-prob base-birth-rate
       set death-prob base-death-rate
@@ -283,7 +298,7 @@ to setup-r
   r:eval "rm(elev, altDiff, acc, pts, Conductance.c, hd, adj, slope.c, speed.c)"
   r:gc
 
-  ask patches [ set cost 0 ]
+  ask active-patches [ set cost 0 ]
 end
 
 to-report patches-at-coords [ coordinates ]
@@ -300,7 +315,8 @@ to go
 
   ask villages [
    gis:apply-raster cost-raster cost
-   ask households [ calculate-field-yield
+   ask households [
+      calculate-field-yield
       check-farmland
       farm ]              ; each household farms and gathers wood in turn
     graze
@@ -534,6 +550,7 @@ to eat
 
 end
 
+
 to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
     ifelse fed-prop < 1
@@ -718,7 +735,7 @@ init-households
 init-households
 0
 50
-4.0
+5.0
 1
 1
 NIL
@@ -845,7 +862,7 @@ wood-req
 wood-req
 1600
 4300
-2000.0
+1600.0
 10
 1
 kg/person
@@ -914,7 +931,7 @@ init-villages
 init-villages
 0
 30
-4.0
+1.0
 1
 1
 NIL
@@ -998,7 +1015,7 @@ precip-CV
 precip-CV
 0
 .9
-0.2
+0.0
 .1
 1
 NIL
@@ -1013,7 +1030,7 @@ persistence
 persistence
 0
 1
-0.0
+0.5
 .1
 1
 NIL
