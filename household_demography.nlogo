@@ -108,7 +108,7 @@ init-occupants
 init-occupants
 1
 20
-4.0
+6.0
 1
 1
 NIL
@@ -157,7 +157,7 @@ theta
 theta
 intrinsic-mortality
 intrinsic-fertility
-0.061
+0.04
 .001
 1
 NIL
@@ -172,7 +172,7 @@ carrying-capacity
 carrying-capacity
 1
 20
-18.0
+10.0
 1
 1
 NIL
@@ -187,7 +187,7 @@ init-households
 init-households
 1
 10000
-2171.0
+1571.0
 10
 1
 NIL
@@ -201,7 +201,7 @@ SLIDER
 intrinsic-fertility
 intrinsic-fertility
 intrinsic-mortality
-1
+.3
 0.066
 .001
 1
@@ -217,11 +217,22 @@ intrinsic-mortality
 intrinsic-mortality
 0
 intrinsic-fertility
-0.057
+0.03
 .001
 1
 NIL
 HORIZONTAL
+
+MONITOR
+473
+334
+602
+379
+NIL
+count households
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?

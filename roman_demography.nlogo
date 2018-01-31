@@ -45,7 +45,7 @@ to go
 end
 
 to check-birth
-  let fertility-rate (table:get fertility-table age-to-ageclass) * (1 - start-pop / carrying-capacity)
+  let fertility-rate (table:get fertility-table age-to-ageclass)
   if fertility-rate > random-float 1 [
     hatch 1 [ setup-individuals ]
     set offspring offspring + 1
@@ -290,23 +290,8 @@ max-births
 max-births
 1
 20
-20.0
+12.0
 1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-24
-293
-203
-326
-carrying-capacity
-carrying-capacity
-1
-10000
-6101.0
-100
 1
 NIL
 HORIZONTAL
@@ -321,8 +306,8 @@ Time
 Growth rate
 0.0
 10.0
--0.5
-0.5
+-0.1
+0.1
 true
 false
 "" ""
