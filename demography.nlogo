@@ -2,9 +2,9 @@ extensions [ table ]
 
 breed [ individuals individual ]
 
-individuals-own [ age sex offspring]
+individuals-own [ age ]
 
-globals [ fertility-table mortality-table mortality-male mortality-female growth-rate start-pop end-pop]
+globals [ food-ratio fertility-table mortality-table mortality-male mortality-female growth-rate start-pop end-pop]
 
 to setup
   ca
@@ -12,6 +12,7 @@ to setup
 
   make-fertility-table
   make-mortality-table
+
 
   set growth-rate []
   create-individuals init-pop [ setup-individuals ]
@@ -23,13 +24,12 @@ end
 to setup-individuals
     ht
     set age 0
-    set offspring 0
-    set sex ifelse-value (0.5 > random-float 1) ["male"] ["female"]
 end
 
 to go
+  set food-ratio carrying-capacity / count individuals
   set start-pop count individuals
-  ask individuals with [ (sex = "female") and (age >= 12) and (age < 50)] [
+  ask individuals with [(age >= 12) and (age < 50)] [
     check-birth
    ]
 
@@ -46,22 +46,17 @@ to go
 end
 
 to check-birth
-  let intrinsic-fertility table:get fertility-table age-to-ageclass
-  let fertility-rate intrinsic-fertility - (intrinsic-fertility - theta) * (count individuals) / carrying-capacity
+  let intrinsic-fertility (table:get fertility-table age-to-ageclass) / 2
+  let fertility-rate intrinsic-fertility * max list (ifelse-value (food-ratio >= .8) [1] [ food-ratio * 2 ]) 0
   if fertility-rate > random-float 1 [
     hatch 1 [ setup-individuals ]
-    set offspring offspring + 1
   ]
 end
 
 to check-death
-  ;let mortality-rate 0
-  ;ifelse sex = "male"
-  ;  [ set mortality-rate table:get mortality-male age-to-ageclass ]
-  ;  [ set mortality-rate table:get mortality-female age-to-ageclass ]
   let intrinsic-mortality table:get mortality-table age-to-ageclass
-  let mortality-rate intrinsic-mortality + (theta - intrinsic-mortality) * (count individuals) / carrying-capacity
-  if mortality-rate > random-float 1 [ die ]
+  let survival-rate (1 - intrinsic-mortality) * max list (ifelse-value (food-ratio >= .8) [1] [ food-ratio * 2 ]) 0
+  if survival-rate < random-float 1 [ die ]
 end
 
 
@@ -88,52 +83,6 @@ to make-fertility-table
 end
 
 to make-mortality-table
-  set mortality-female table:make
-  table:put mortality-female 0 0.3056
-  table:put mortality-female 1 0.2158
-  table:put mortality-female 5 0.0606
-  table:put mortality-female 10 0.0474
-  table:put mortality-female 15 0.0615
-  table:put mortality-female 20 0.0766
-  table:put mortality-female 25 0.0857
-  table:put mortality-female 30 0.0965
-  table:put mortality-female 35 0.1054
-  table:put mortality-female 40 0.1123
-  table:put mortality-female 45 0.1197
-  table:put mortality-female 50 0.1529
-  table:put mortality-female 55 0.1912
-  table:put mortality-female 60 0.2715
-  table:put mortality-female 65 0.3484
-  table:put mortality-female 70 0.4713
-  table:put mortality-female 75 0.6081
-  table:put mortality-female 80 0.7349
-  table:put mortality-female 85 0.8650
-  table:put mortality-female 90 0.9513
-  table:put mortality-female 95 1.0000
-
-  set mortality-male table:make
-  table:put mortality-male 0 0.3517
-  table:put mortality-male 1 0.2147
-  table:put mortality-male 5 0.0563
-  table:put mortality-male 10 0.0404
-  table:put mortality-male 15 0.0547
-  table:put mortality-male 20 0.0775
-  table:put mortality-male 25 0.0868	
-  table:put mortality-male 30 0.1002
-  table:put mortality-male 35 0.1168
-  table:put mortality-male 40 0.1397
-  table:put mortality-male 45 0.1597
-  table:put mortality-male 50 0.1981
-  table:put mortality-male 55 0.2354
-  table:put mortality-male 60 0.3091
-  table:put mortality-male 65 0.3921
-  table:put mortality-male 70 0.5040
-  table:put mortality-male 75 0.6495
-  table:put mortality-male 80 0.7623	
-  table:put mortality-male 85 0.8814
-  table:put mortality-male 90 0.9578
-  table:put mortality-male 95 1.0000
-
   set mortality-table table:make
   table:put mortality-table 0 0.4669
   table:put mortality-table 1 0.0702
@@ -244,11 +193,10 @@ Population
 0.0
 10.0
 true
-true
+false
 "" ""
 PENS
-"Males" 1.0 0 -13791810 true "" "plot count individuals with [sex = \"male\"]"
-"Females" 1.0 0 -2674135 true "" "plot count individuals with [sex = \"female\"]"
+"Population" 1.0 0 -13791810 true "" "plot count individuals"
 
 BUTTON
 17
@@ -297,30 +245,15 @@ Growth rate (%)
 11
 
 SLIDER
-78
-481
-250
-514
-theta
-theta
-0
-1
-0.05
-.01
-1
-NIL
-HORIZONTAL
-
-SLIDER
-99
-541
-278
-574
+13
+491
+192
+524
 carrying-capacity
 carrying-capacity
 1000
 10000
-10000.0
+3000.0
 1000
 1
 NIL
