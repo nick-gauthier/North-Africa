@@ -1,10 +1,10 @@
-extensions [ table ]
+extensions [ table R pathdir]
 
 breed [ individuals individual ]
 
 individuals-own [ age ]
 
-globals [ food-ratio fertility-table mortality-table mortality-male mortality-female growth-rate start-pop end-pop]
+globals [ fertility-elasticity survival-elasticity1 survival-elasticity5 survival-elasticity25 survival-elasticity65 food-ratio fertility-table mortality-table mortality-male mortality-female growth-rate start-pop end-pop]
 
 to setup
   ca
@@ -13,10 +13,13 @@ to setup
   make-fertility-table
   make-mortality-table
 
+  r:eval "library(mgcv)"
+  r:put "indir" (word pathdir:get-model-path "/elasticities")
+  r:eval "load(indir)"
 
   set growth-rate []
   create-individuals init-pop [ setup-individuals ]
-  ask individuals [ set age random 80 ]
+  ask individuals [ set age random 50 ]
 
   reset-ticks
 end
@@ -27,7 +30,8 @@ to setup-individuals
 end
 
 to go
-  set food-ratio carrying-capacity / count individuals
+
+  update-elasticities
   set start-pop count individuals
   ask individuals with [(age >= 12) and (age < 50)] [
     check-birth
@@ -45,9 +49,20 @@ to go
   tick
 end
 
+to update-elasticities
+  set food-ratio carrying-capacity / count individuals
+  r:put "food_ratio" food-ratio
+  set fertility-elasticity r:get "predict(fertility_mod, data.frame(food_ratio = food_ratio))"
+  set survival-elasticity1 r:get "predict(survival_mod1, data.frame(food_ratio = 1))"
+  set survival-elasticity5 r:get "predict(survival_mod5, data.frame(food_ratio = 1))"
+  set survival-elasticity25 r:get "predict(survival_mod25, data.frame(food_ratio = 1))"
+  set survival-elasticity65 r:get "predict(survival_mod65, data.frame(food_ratio = 1))"
+end
+
 to check-birth
   let intrinsic-fertility (table:get fertility-table age-to-ageclass) / 2
-  let fertility-rate intrinsic-fertility * max list (ifelse-value (food-ratio >= .8) [1] [ food-ratio * 2 ]) 0
+
+  let fertility-rate intrinsic-fertility * ifelse-value (food-ratio > 1) [1] [ fertility-elasticity  ]
   if fertility-rate > random-float 1 [
     hatch 1 [ setup-individuals ]
   ]
@@ -55,7 +70,8 @@ end
 
 to check-death
   let intrinsic-mortality table:get mortality-table age-to-ageclass
-  let survival-rate (1 - intrinsic-mortality) * max list (ifelse-value (food-ratio >= .8) [1] [ food-ratio * 2 ]) 0
+  let age-survival-elasticity ifelse-value ( age <= 1 ) [survival-elasticity1] [ifelse-value (age <= 5) [survival-elasticity5] [ifelse-value (age <= 25) [survival-elasticity25] [survival-elasticity65]]]
+  let survival-rate (1 - intrinsic-mortality) * ifelse-value (food-ratio > 1) [1] [ age-survival-elasticity ]
   if survival-rate < random-float 1 [ die ]
 end
 
@@ -105,13 +121,13 @@ to make-mortality-table
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-1057
-312
-1090
-346
+1020
+326
+1040
+347
 -1
 -1
-12.5
+6.0
 1
 10
 1
@@ -172,10 +188,10 @@ SLIDER
 156
 init-pop
 init-pop
-0
-10000
-1300.0
-100
+1
+20
+6.0
+1
 1
 NIL
 HORIZONTAL
@@ -234,10 +250,10 @@ PENS
 "default" 5.0 1 -16777216 true "" "histogram [age] of turtles"
 
 MONITOR
-15
-218
-132
-263
+582
+136
+699
+181
 Growth rate (%)
 (mean growth-rate) * 100
 2
@@ -246,18 +262,29 @@ Growth rate (%)
 
 SLIDER
 13
-491
+172
 192
-524
+205
 carrying-capacity
 carrying-capacity
-1000
-10000
-3000.0
-1000
+1
+20
+5.0
+1
 1
 NIL
 HORIZONTAL
+
+MONITOR
+604
+208
+681
+253
+NIL
+food-ratio
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
