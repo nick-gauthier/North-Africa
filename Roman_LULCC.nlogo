@@ -1,10 +1,10 @@
-extensions [ gis R pathdir ] ; Load GIS extension for importing environmental layers
+extensions [ gis R pathdir table ] ; Load GIS extension for importing environmental layers
 
 breed [ households household ]  ; basic agent type
 households-own [
   grain-supply       ; volume of grain held by household
   occupants          ; number of individuals in a household
-  fed-prop           ; proportion of a household members receiving enough food
+  food-ratio           ; proportion of a household members receiving enough food
 
   farm-fields        ; list of patches used by household for farming
   field-max          ; maximum number of farm field patches a household can own, based on number of occupants
@@ -12,8 +12,6 @@ households-own [
   field-yield-estimate ; yield per field estimate
 
   starve-count
-  birth-prob
-  death-prob
 ]
 
 breed [ villages village ]       ; collective of households, allows for selective coarse-graining
@@ -52,12 +50,7 @@ globals [
   max-veg                     ; type of climax vegetation
   wood-gather-intensity       ; rate of wood gathering
 
-  base-birth-rate                  ; baseline birth rate for households
-  base-death-rate                  ; baseline death rate for households
-  min-birth-rate
-  max-birth-rate
-  min-death-rate
-  max-death-rate
+
   seed-prop                   ; proportion of harvests required for seeds
   starvation-threshold        ; births cease if fed-prop drops below starvation threshold
   demographic-delta
@@ -70,6 +63,9 @@ globals [
   digestible-matter-req       ; kg/yr/head
   ovicaprid-per-person
   stocking-rate               ; animals/ha
+
+  fertility-table
+  mortality-table
 
   relief-raster               ; GIS raster shaded relief terrain map, for visualization
   soils-raster                ; GIS raster of soil types
@@ -102,13 +98,6 @@ to setup
   set max-yield 3500                ; kg/ha
   set seed-prop .15                 ; agents reserve 15% of yields for seed
 
-  set base-birth-rate 0.066              ; initial birth rate
-  set base-death-rate 0.057               ; initial death rate
-  set max-birth-rate 0.2
-  set min-birth-rate 0.05
-  set max-death-rate 0.2
-  set min-death-rate 0.05
-  set demographic-delta 0.001
   set starvation-threshold 0.6      ; birth ceases if household has less than 60% of its food requirement
 
   set digestible-matter-req 894.25 ;kg/yr/head for awassi sheep, 584 for baladi goat
@@ -120,20 +109,21 @@ to setup
     [setup-gis]      ; if diagnostic mode is off, import gis data
   setup-patches                               ; patch-specific setup procedures
   setup-villages                              ; village and household setup procedures
+  setup-demography
   setup-r
 
   reset-ticks
 end
 
 to setup-landscape
-  r:eval "library(NLMR)"
-  r:eval "library(raster)"
-  r:eval "land_cover <- nlm_randomcluster(100, 100, p = 0.5)"
-  r:eval "land_cover <- (util_classify(land_cover, c(0.5, 0.25, 0.25)) + 1) * 25"
-  r:put "outdir" (word pathdir:get-model-path "/data/netlogo/lc_tmp.asc")
-  r:eval "writeRaster(land_cover, outdir, overwrite = T)"
-  set lc-raster gis:load-dataset "data/netlogo/lc_tmp.asc"
-  gis:apply-raster lc-raster vegetation
+  ;r:eval "library(NLMR)"
+  ;r:eval "library(raster)"
+  ;r:eval "land_cover <- nlm_randomcluster(100, 100, p = 0.5)"
+  ;r:eval "land_cover <- (util_classify(land_cover, c(0.5, 0.25, 0.25)) + 1) * 25"
+  ;r:put "outdir" (word pathdir:get-model-path "/data/netlogo/lc_tmp.asc")
+  ;r:eval "writeRaster(land_cover, outdir, overwrite = T)"
+  ;set lc-raster gis:load-dataset "data/netlogo/lc_tmp.asc"
+  ;gis:apply-raster lc-raster vegetation
   ask patches [ ifelse (vegetation <= 0) or (vegetation >= 0) [] [ set vegetation 50 ]]
 end
 
@@ -260,6 +250,41 @@ to setup-villages  ; create villages, then have each village create and initiali
   ]
 end
 
+to setup-demography
+  r:eval "library(mgcv)"
+  r:put "indir" (word pathdir:get-model-path "/elasticities")
+  r:eval "load(indir)"
+
+  set fertility-table table:make
+  table:put fertility-table 10 0.022
+  table:put fertility-table 15 0.232
+  table:put fertility-table 20 0.343
+  table:put fertility-table 25 0.367
+  table:put fertility-table 30 0.293
+  table:put fertility-table 35 0.218
+  table:put fertility-table 40 0.216
+  table:put fertility-table 45 0.134
+
+  set mortality-table table:make
+  table:put mortality-table 0 0.4669
+  table:put mortality-table 1 0.0702
+  table:put mortality-table 5 0.0132
+  table:put mortality-table 10 0.0099
+  table:put mortality-table 15 0.0154
+  table:put mortality-table 20 0.0172
+  table:put mortality-table 25 0.0195	
+  table:put mortality-table 30 0.0223
+  table:put mortality-table 35 0.0259
+  table:put mortality-table 40 0.0306
+  table:put mortality-table 45 0.0373
+  table:put mortality-table 50 0.0473
+  table:put mortality-table 55 0.0573
+  table:put mortality-table 60 0.0784
+  table:put mortality-table 65 0.1042
+  table:put mortality-table 70 0.1434
+  table:put mortality-table 75 0.2039
+  table:put mortality-table 80 0.2654	
+end
 
 to setup-r
   r:eval "library(gdistance)"
@@ -327,6 +352,7 @@ to go
   if dynamic-pop? [birth-death]        ; allow households to grow and die if dynamic-pop? is turned on
   regrow-patch                         ; regenerate vegetation and soil fertility
 
+  if count households = 0 [ stop ]
   tick
 end
 
@@ -553,43 +579,58 @@ end
 
 to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
-    ifelse fed-prop < 1
-      [ ifelse fed-prop > 0.85
-          [ set birth-prob birth-prob - 0.5 * demographic-delta
-            set death-prob death-prob + 0.5 * demographic-delta ]
-          [ ifelse fed-prop > 0.75
-            [ set birth-prob birth-prob - (2 * demographic-delta) / 3
-              set death-prob death-prob + (2 * demographic-delta) / 3 ]
-            [ set birth-prob birth-prob - demographic-delta
-              set death-prob death-prob + demographic-delta ] ] ]
-      [ ifelse fed-prop < 1.15
-        [ set birth-prob birth-prob + 0.5 * demographic-delta
-          set death-prob death-prob - 0.5 * demographic-delta ]
-        [ ifelse fed-prop < 1.25
-          [ set birth-prob birth-prob + (2 * demographic-delta) / 3
-            set death-prob death-prob - (2 * demographic-delta) / 3 ]
-          [ set birth-prob birth-prob + demographic-delta
-            set death-prob death-prob - demographic-delta ] ] ]
+  r:put "food_ratio" food-ratio
+  let fertility-elasticity r:get "predict(fertility_mod, data.frame(food_ratio = food_ratio))"
 
-    if birth-prob > max-birth-rate [ set birth-prob max-birth-rate ]
-    if birth-prob < min-birth-rate [ set birth-prob min-birth-rate ]
-    if death-prob > max-death-rate [ set death-prob max-death-rate ]
-    if death-prob < min-death-rate [ set death-prob min-death-rate ]
 
-    let births random-binomial occupants birth-prob
-    let deaths random-binomial occupants death-prob
 
-    if births != deaths [
-      set occupants occupants + births - deaths  ; adjust household size
-      if occupants <= 0 [ die ]                  ; die if no one's left
-      set field-max floor ((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
+    let births 0
+    foreach occupants [ age ->
+      let intrinsic-fertility (table:get fertility-table age-to-ageclass age) / 2
+      let fertility-rate intrinsic-fertility * ifelse-value (food-ratio > 1) [1] [ fertility-elasticity  ]
+      if fertility-rate > random-float 1 [ set births births + 1 ]
     ]
+
+    set occupants map death? occupants
+
+    set occupants filter [i -> i != "dead"] occupants
+    repeat births [set occupants lput 0 occupants]
+    set occupants map [i -> i + 1] occupants
+
+      if  empty? occupants [ die ]                  ; die if no one's left
+      set field-max floor ((length (filter [ i -> i > 10 and i < 65 ] occupants)  * max-capita-labor) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
+
   ]
   ; check to see if villages needs to grow
   ask villages [
-    let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha) ; population to settled area determined by power law relationship
-    if settled-area != count settled-patches [ adjust-settlement-size (settled-area - count settled-patches) ]  ; if there are too many people, grow the village
+    ;let settled-area max list 1 round(.175 * (sum (length [occupants] of households-here)) ^ .634 * patches-per-ha) ; population to settled area determined by power law relationship
+    ;if settled-area != count settled-patches [ adjust-settlement-size (settled-area - count settled-patches) ]  ; if there are too many people, grow the village
   ]
+end
+
+to-report death? [age]
+    let survival-elasticity1 r:get "predict(survival_mod1, data.frame(food_ratio = 1))"
+  let survival-elasticity5 r:get "predict(survival_mod5, data.frame(food_ratio = 1))"
+  let survival-elasticity25 r:get "predict(survival_mod25, data.frame(food_ratio = 1))"
+  let survival-elasticity65 r:get "predict(survival_mod65, data.frame(food_ratio = 1))"
+  let intrinsic-mortality table:get mortality-table age-to-ageclass age
+      let age-survival-elasticity ifelse-value ( age <= 1 ) [survival-elasticity1] [ifelse-value (age <= 5) [survival-elasticity5] [ifelse-value (age <= 25) [survival-elasticity25] [survival-elasticity65]]]
+      let survival-rate (1 - intrinsic-mortality) * ifelse-value (food-ratio > 1) [1] [ age-survival-elasticity ]
+      report ifelse-value (survival-rate < random-float 1) [ "dead" ] [age]
+end
+
+
+to check-death
+
+end
+to-report age-to-ageclass [age]
+  ifelse age <= 1
+    [ report age ]
+    [ ifelse age < 5
+      [ report 1 ]
+    [ ifelse age > 80
+      [report 80]
+      [report floor (age / 5) * 5 ]]]
 end
 
 to-report random-binomial [n p]
@@ -651,11 +692,11 @@ end
 GRAPHICS-WINDOW
 286
 10
-1340
-564
+794
+519
 -1
 -1
-1.0
+5.0
 1
 10
 1
@@ -666,9 +707,9 @@ GRAPHICS-WINDOW
 0
 1
 0
-1045
+99
 0
-544
+99
 1
 1
 1
@@ -735,7 +776,7 @@ init-households
 init-households
 0
 50
-5.0
+16.0
 1
 1
 NIL
@@ -944,7 +985,7 @@ SWITCH
 514
 dev-mode?
 dev-mode?
-1
+0
 1
 -1000
 
