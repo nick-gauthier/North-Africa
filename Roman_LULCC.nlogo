@@ -405,7 +405,7 @@ to check-farmland ; agents assess how many fields they need given household size
   ][
     set field-req field-max
   ]
-  set field-req (min list field-req field-max)
+  set field-req (min list field-req field-max) * 2
   ifelse tenure = "none" [   ; if no land tenure, household drops all fields and chooses new ones
     if count farm-fields > 0 [ drop-farmland (count farm-fields) ]
     choose-farmland (field-req)
@@ -465,7 +465,8 @@ end
 
 to farm ; agents harvest food from patch and feed occupants
   ; calculate yields from each farmed patch and modify patch accordingly
-  ask farm-fields [
+  let num-fields (count farm-fields) / 2
+  ask n-of num-fields farm-fields [
     ifelse fertility > 0                                 ; only farm fertile patches
       [ set patch-yield yield "wheat"                    ; calculate yields
         set fertility (fertility - random-normal 3 2) ]  ; reduce fertility of farmed patch
