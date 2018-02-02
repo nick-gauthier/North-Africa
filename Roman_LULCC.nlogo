@@ -2,7 +2,7 @@ extensions [ gis R pathdir table ] ; Load GIS extension for importing environmen
 
 breed [ households household ]  ; basic agent type
 households-own [
-  grain-supply       ; volume of grain held by household
+  stored-food       ; volume of grain held by household
   occupants          ; number of individuals in a household
   food-ratio           ; proportion of a household members receiving enough food
 
@@ -343,7 +343,6 @@ end
 
 to go
   rain        ; generate annual precipitation as a stochastic process
-  storage-decay                        ; decay food in storage
 
   ask villages [
    gis:apply-raster cost-raster cost
@@ -370,10 +369,6 @@ end
 
 to rain ; generate rainfall as a stochastic process, approximately gaussian, with optional AR(1) persistence
   set annual-precip max list 0 ( ( mean-precip + (annual-precip - mean-precip) * persistence ) * ( 1 + precip-CV * random-normal 0 1 ) )
-end
-
-to storage-decay
-  ask households [ set grain-supply grain-supply - grain-supply * .3 ]
 end
 
 
@@ -479,13 +474,17 @@ to farm ; agents harvest food from patch and feed occupants
    ]
 
   ; harvest grain, store it, and feed the household
-  let total-harvest sum [patch-yield] of farm-fields                             ; combine yields from all farmed patches
+  let total-harvest (sum [patch-yield] of farm-fields) * (1 - seed-prop)                             ; combine yields from all farmed patches
 
+  let food-need grain-req * occupants
+  set food-ratio (stored-food + total-harvest) / food-need
 
-  set fed-prop total-harvest * (1 - seed-prop) / (grain-req * occupants)                 ; what proportion of household is able to be fed?
-  set grain-supply grain-supply + total-harvest * (1 - seed-prop)     ; store what's left after removing some grain for seed
-
-  set grain-supply max list 0 (grain-supply - grain-req * occupants)  ; subtract consumed food from storage without going negative
+  ifelse food-need >= stored-food
+    [set stored-food 0
+      set food-need food-need - stored-food
+      set total-harvest max list 0 (total-harvest - food-need)]
+    [set stored-food stored-food - food-need ]
+  set stored-food total-harvest
 
   remember
   ask farm-fields [set patch-yield 0]
@@ -502,7 +501,7 @@ to remember
 end
 
 to-report yield [crop]  ; report crop yields given yield-reduction factors based on nonlinear multiple regression of ethnographic data (see MedLands project)
-  ifelse annual-precip >= .14  ; if there is rain, get yields. must have at least .14 meters for any yields
+  ifelse annual-precip >= .14 and fertility > 1  ; if there is rain, get yields. must have at least .14 meters for any yields
     [ let potential-yield ifelse-value (crop = "wheat")
         [ (((0.51 * ln(annual-precip)) + 1.03) * ((0.19 * ln(fertility / 100)) + 1)) / 2 ]    ; wheat potential yields
         [ (((0.48 * ln(annual-precip)) + 1.51) * ((0.18 * ln(fertility / 100)) + .98)) / 2 ]  ; barley potential yields
@@ -810,24 +809,6 @@ mean-precip
 1
 m
 HORIZONTAL
-
-PLOT
-712
-579
-912
-729
-Grain Supply
-NIL
-NIL
-0.0
-10.0
-0.0
-10.0
-true
-false
-"" ""
-PENS
-"pen-0" 1.0 0 -3844592 true "" "plot mean [grain-supply] of households"
 
 CHOOSER
 4
