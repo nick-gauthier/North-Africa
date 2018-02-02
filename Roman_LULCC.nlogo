@@ -346,7 +346,7 @@ to go
 
   ask villages [
    gis:apply-raster cost-raster cost
-   ask households [
+   ask households-here [
       calculate-field-yield
       check-farmland
       farm ]              ; each household farms and gathers wood in turn
@@ -493,7 +493,7 @@ end
 
 to remember
   ; store yield info in agent memory
-  let mean-yield ifelse-value (any? farm-fields) [mean [ patch-yield ] of farm-fields] [0]                ; calculate average patch crop yield
+  let mean-yield ifelse-value (any? farm-fields) [mean [ patch-yield ] of (farm-fields with [patch-yield > 0])] [0]                ; calculate average patch crop yield
   let fuzzy-yield-memory random-normal mean-yield (mean-yield * .0333)     ; store averge crop yield in memory, with some error;
   set yield-memory lput fuzzy-yield-memory yield-memory
   if (length yield-memory) > yield-memory-length                    ; comparing memory length to slider memory length input
@@ -953,7 +953,7 @@ init-villages
 init-villages
 0
 30
-6.0
+10.0
 1
 1
 NIL
