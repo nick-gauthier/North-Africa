@@ -10,8 +10,15 @@ households-own [
   field-max          ; maximum number of farm field patches a household can own, based on number of occupants
   yield-memory        ; average per-patch crop yields in agent memory
   field-yield-estimate ; yield per field estimate
+  labor
 
   starve-count
+]
+
+breed [individuals individual]
+individuals-own [
+ age
+ house
 ]
 
 breed [ villages village ]       ; collective of households, allows for selective coarse-graining
@@ -228,13 +235,13 @@ to setup-villages  ; create villages, then have each village create and initiali
     hatch-households init-households [
      ; initialize household variables related to food production
       set yield-memory (list mean [yield "wheat"] of patches in-radius 2)  ; give household initial rough estimate of potential crop yields
-      set occupants 6    ; households start off with 6 occupants
-      set field-max floor ((occupants * max-capita-labor * 0.85) / 40) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
-      set grain-supply grain-req * occupants
+      set occupants 4    ; households start off with 2 occupants
+      set labor 4
+      set field-max floor (labor / 40 ) * patches-per-ha  ; how many patches can a household farm? assuming 40 days of labor required for a field
       set farm-fields no-patches
-      set birth-prob base-birth-rate
-      set death-prob base-death-rate
       ht  ; hide household turtles
+
+      hatch-individuals occupants [ set age 25 set house myself ]
     ]
 
     ; after making households, the village claims patches to use for the physical settlement
@@ -579,51 +586,46 @@ end
 
 to birth-death   ; add or remove occupants from household, based on fed proportion of household
   ask households [
-  r:put "food_ratio" food-ratio
-  let fertility-elasticity r:get "predict(fertility_mod, data.frame(food_ratio = food_ratio))"
-
-
+    r:put "food_ratio" food-ratio
+    let fertility-elasticity r:get "predict(fertility_mod, data.frame(food_ratio = food_ratio))"
+    let survival-elasticity1 r:get "predict(survival_mod1, data.frame(food_ratio = 1))"
+    let survival-elasticity5 r:get "predict(survival_mod5, data.frame(food_ratio = 1))"
+    let survival-elasticity25 r:get "predict(survival_mod25, data.frame(food_ratio = 1))"
+    let survival-elasticity65 r:get "predict(survival_mod65, data.frame(food_ratio = 1))"
 
     let births 0
-    foreach occupants [ age ->
-      let intrinsic-fertility (table:get fertility-table age-to-ageclass age) / 2
-      let fertility-rate intrinsic-fertility * ifelse-value (food-ratio > 1) [1] [ fertility-elasticity  ]
-      if fertility-rate > random-float 1 [ set births births + 1 ]
+
+    ask individuals with [(house = myself)] [
+      let hunger [food-ratio] of myself
+      if (age >= 12) and (age < 50) [
+        let intrinsic-fertility (table:get fertility-table age-to-ageclass) / 2
+        let fertility-rate intrinsic-fertility * ifelse-value (hunger > 1) [1] [ fertility-elasticity ]
+        if fertility-rate > random-float 1 [set births births + 1 ]
+      ]
+      let intrinsic-mortality table:get mortality-table age-to-ageclass
+      let age-survival-elasticity ifelse-value ( age <= 1 ) [survival-elasticity1] [ifelse-value (age <= 5) [survival-elasticity5] [ifelse-value (age <= 25) [survival-elasticity25] [survival-elasticity65]]]
+      let survival-rate (1 - intrinsic-mortality) * ifelse-value (hunger > 1) [1] [ age-survival-elasticity ]
+      if survival-rate < random-float 1 [ die ]
+
+      set age age + 1
     ]
 
-    set occupants map death? occupants
-
-    set occupants filter [i -> i != "dead"] occupants
-    repeat births [set occupants lput 0 occupants]
-    set occupants map [i -> i + 1] occupants
-
-      if  empty? occupants [ die ]                  ; die if no one's left
-      set field-max floor ((length (filter [ i -> i > 10 and i < 65 ] occupants)  * max-capita-labor) / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
+    hatch-individuals births [ set age 0 set house myself]
+    set occupants count individuals with [house = myself]
+    if occupants = 0 [ die ]                  ; die if no one's left
+    set labor (count individuals with [house = myself and age > 10 and age < 65]) * max-capita-labor
+    set field-max floor (labor / 40) * patches-per-ha   ; adjust a household's max fields based on available labor
 
   ]
   ; check to see if villages needs to grow
   ask villages [
-    ;let settled-area max list 1 round(.175 * (sum (length [occupants] of households-here)) ^ .634 * patches-per-ha) ; population to settled area determined by power law relationship
-    ;if settled-area != count settled-patches [ adjust-settlement-size (settled-area - count settled-patches) ]  ; if there are too many people, grow the village
+    let settled-area max list 1 round(.175 * (sum [occupants] of households-here) ^ .634 * patches-per-ha) ; population to settled area determined by power law relationship
+    if settled-area != count settled-patches [ adjust-settlement-size (settled-area - count settled-patches) ]  ; if there are too many people, grow the village
   ]
 end
 
-to-report death? [age]
-    let survival-elasticity1 r:get "predict(survival_mod1, data.frame(food_ratio = 1))"
-  let survival-elasticity5 r:get "predict(survival_mod5, data.frame(food_ratio = 1))"
-  let survival-elasticity25 r:get "predict(survival_mod25, data.frame(food_ratio = 1))"
-  let survival-elasticity65 r:get "predict(survival_mod65, data.frame(food_ratio = 1))"
-  let intrinsic-mortality table:get mortality-table age-to-ageclass age
-      let age-survival-elasticity ifelse-value ( age <= 1 ) [survival-elasticity1] [ifelse-value (age <= 5) [survival-elasticity5] [ifelse-value (age <= 25) [survival-elasticity25] [survival-elasticity65]]]
-      let survival-rate (1 - intrinsic-mortality) * ifelse-value (food-ratio > 1) [1] [ age-survival-elasticity ]
-      report ifelse-value (survival-rate < random-float 1) [ "dead" ] [age]
-end
 
-
-to check-death
-
-end
-to-report age-to-ageclass [age]
+to-report age-to-ageclass
   ifelse age <= 1
     [ report age ]
     [ ifelse age < 5
@@ -633,9 +635,6 @@ to-report age-to-ageclass [age]
       [report floor (age / 5) * 5 ]]]
 end
 
-to-report random-binomial [n p]
-   report sum n-values n [ifelse-value (p > random-float 1) [1] [0]]
-end
 
 to adjust-settlement-size [patch-diff]  ; change settled area to reflect new village population
   ifelse patch-diff > 0            ; need to add or subtract settled patches?
@@ -692,11 +691,11 @@ end
 GRAPHICS-WINDOW
 286
 10
-794
-519
+1340
+564
 -1
 -1
-5.0
+1.0
 1
 10
 1
@@ -707,9 +706,9 @@ GRAPHICS-WINDOW
 0
 1
 0
-99
+1045
 0
-99
+544
 1
 1
 1
@@ -776,7 +775,7 @@ init-households
 init-households
 0
 50
-16.0
+10.0
 1
 1
 NIL
@@ -806,7 +805,7 @@ mean-precip
 mean-precip
 .14
 1
-0.6
+0.8
 .01
 1
 m
@@ -838,7 +837,7 @@ CHOOSER
 tenure
 tenure
 "none" "satisficing" "maximizing"
-1
+2
 
 PLOT
 933
@@ -890,9 +889,9 @@ NIL
 10.0
 true
 false
-"" ""
+"" ";ask households [\n;  create-temporary-plot-pen (word who)\n;  set-plot-pen-color color\n;  plotxy ticks occupants\n;]"
 PENS
-"pen-0" 1.0 0 -7500403 true "" "plot sum [occupants] of households"
+"pen-0" 1.0 0 -7500403 true "" "plot count individuals"
 
 SLIDER
 10
@@ -939,7 +938,7 @@ expectation-scalar
 expectation-scalar
 0
 1
-1.0
+0.9
 .05
 1
 NIL
@@ -972,7 +971,7 @@ init-villages
 init-villages
 0
 30
-1.0
+6.0
 1
 1
 NIL
@@ -985,7 +984,7 @@ SWITCH
 514
 dev-mode?
 dev-mode?
-0
+1
 1
 -1000
 
@@ -1056,7 +1055,7 @@ precip-CV
 precip-CV
 0
 .9
-0.0
+0.3
 .1
 1
 NIL
@@ -1071,7 +1070,7 @@ persistence
 persistence
 0
 1
-0.5
+0.4
 .1
 1
 NIL
@@ -1086,7 +1085,7 @@ yield-memory-length
 yield-memory-length
 1
 50
-10.0
+15.0
 1
 1
 NIL
