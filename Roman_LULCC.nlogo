@@ -57,7 +57,6 @@ globals [
   max-veg                     ; type of climax vegetation
   wood-gather-intensity       ; rate of wood gathering
 
-
   seed-prop                   ; proportion of harvests required for seeds
   starvation-threshold        ; births cease if fed-prop drops below starvation threshold
   demographic-delta
@@ -80,6 +79,7 @@ globals [
   lc-raster
   ;cost-raster                 ; GIS raster of anisotropic LCPs from village locations
   slope-raster                ; GIS raster of terrain slope, reclassified based on impacts on arability
+  villages-dataset
   cities-dataset
   roads-dataset
 ]
@@ -152,16 +152,17 @@ to setup-gis
 
   set cities-dataset gis:load-dataset "data/test.shp"
   set roads-dataset gis:load-dataset "data/NA_roads.shp"
+  set villages-dataset gis:load-dataset "data/netlogo/settlements.shp"
 
-    foreach gis:feature-list-of cities-dataset [ vector-feature ->
+    foreach gis:feature-list-of villages-dataset [ vector-feature ->
   ; a feature in a point dataset may have multiple points, so we have a list of lists of points, which is why we need to use first twice here
        let location gis:location-of (first (first (gis:vertex-lists-of vector-feature)))
        if not empty? location
-       [ create-cities 1
+       [ create-villages 1
          [ set xcor item 0 location
            set ycor item 1 location
-        set shape "circle"
-        set size 10
+        ;set shape "circle"
+        ;set size 10
          ]
        ]
   ]
@@ -222,13 +223,14 @@ end
 
 
 to setup-villages  ; create villages, then have each village create and initialize households
-  create-villages ifelse-value dev-mode? [1] [init-villages] [
+  ;create-villages ifelse-value dev-mode? [1] [init-villages] [
+
+   ; ifelse dev-mode?
+     ; [ move-to patch 49 49 ]
+   ; [ move-to one-of active-patches with [ slope-val  >= 0.75 ] ] ; move villages to random locations
+
+ask villages [
     ht  ; hide the village turtles
-    ifelse dev-mode?
-      [ move-to patch 49 49 ]
-    [ move-to one-of active-patches with [ slope-val  >= 0.75 ] ] ; move villages to random locations
-
-
     set graze-yield-estimate 250 / patches-per-ha
 
     ; villages create households and initialize them
@@ -775,7 +777,7 @@ init-households
 init-households
 0
 50
-10.0
+4.0
 1
 1
 NIL
@@ -805,7 +807,7 @@ mean-precip
 mean-precip
 .14
 1
-0.8
+0.5
 .01
 1
 m
@@ -822,7 +824,7 @@ tenure
 2
 
 PLOT
-933
+724
 577
 1133
 727
@@ -834,7 +836,7 @@ NIL
 0.0
 10.0
 true
-false
+true
 "" ""
 PENS
 "fields" 1.0 0 -955883 true "" "plot (count patches with [field? = TRUE]) * 100 / count patches"
@@ -1052,7 +1054,7 @@ persistence
 persistence
 0
 1
-0.4
+0.5
 .1
 1
 NIL
