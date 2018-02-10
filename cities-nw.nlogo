@@ -1,13 +1,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setup Procedures ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;
-extensions [ nw ls csv palette ]
+extensions [ nw ls csv palette gis ]
 
 breed [ cities city]
+cities-own [ population attractiveness name coastal?]
 
-cities-own [ population attractiveness ]
+breed [ roads road ]
 links-own [ flow ]
-globals [ mean-distance dt ]
+patches-own [ distance-coast ]
+globals [
+  mean-distance dt
+  coast-dataset roads-dataset cities-dataset
+]
 
 to setup
   ls:reset
@@ -16,6 +21,8 @@ to setup
   resize-world 0 99 0 99
   set-patch-size 5
 
+  if use-gis? [ setup-gis ]
+
   setup-cities
 
   set mean-distance mean [ link-length ] of links
@@ -23,11 +30,48 @@ to setup
   reset-ticks
 end
 
+to setup-gis
+  set-patch-size 5
+  set cities-dataset gis:load-dataset "data/NA_cities.shp"
+  set roads-dataset gis:load-dataset "data/NA_roads.shp"
+  set coast-dataset gis:load-dataset "data/netlogo/distance_coast.asc"
+  gis:set-world-envelope gis:envelope-of coast-dataset
+  gis:apply-raster coast-dataset distance-coast
+  foreach gis:feature-list-of cities-dataset [ vector-feature ->
+    let location gis:location-of (first (first (gis:vertex-lists-of vector-feature)))
+     if not empty? location
+    [ create-cities 1
+      [ set xcor item 0 location
+        set ycor item 1 location
+        set name gis:property-value vector-feature "name"
+        ]
+      ]
+ ]
+
+ ; gis:set-drawing-color white
+;;  gis:draw roads-dataset 1
+; foreach gis:feature-list-of roads-dataset [ vector-feature ->
+;     let centroid gis:location-of gis:centroid-of vector-feature
+  ;   if not empty? centroid
+  ;   [ create-roads 1
+ ;         [ set xcor item 0 centroid
+;            set ycor item 1 centroid
+;            hide-turtle
+ ;           set label gis:property-value vector-feature "NAME"
+ ;        ]
+;     ]
+ ;  ]
+end
+
 to setup-cities
-  create-cities city-count [
+  if use-gis? = FALSE [
+    create-cities city-count [ move-to one-of patches ]
+  ]
+
+  ask cities [
+    ifelse [distance-coast] of patch-here  <= 1000 [set coastal? TRUE] [set coastal? FALSE]
     set size 1
     set attractiveness 1
-    move-to one-of patches
     set color blue
     create-links-from other cities [ hide-link ]
     if use-ls? [
@@ -66,6 +110,7 @@ end
 to update-attractiveness
   ask cities [
     let in-flows sum [ flow ] of my-in-links
+    if coastal? [set in-flows in-flows + in-flows * coastal-flows]
     set attractiveness attractiveness + dt * (in-flows - attractiveness) * attractiveness
   ]
 end
@@ -100,8 +145,8 @@ GRAPHICS-WINDOW
 1
 1
 0
-1
-1
+0
+0
 1
 0
 99
@@ -166,9 +211,9 @@ NIL
 
 SLIDER
 7
+254
 179
-179
-212
+287
 alpha
 alpha
 .9
@@ -181,9 +226,9 @@ HORIZONTAL
 
 SLIDER
 5
-218
+293
 177
-251
+326
 beta
 beta
 20
@@ -196,19 +241,19 @@ HORIZONTAL
 
 TEXTBOX
 10
-159
+234
 160
-177
+252
 Scaling Parameters
 12
 0.0
 1
 
 SLIDER
-7
-90
-179
-123
+4
+131
+176
+164
 city-count
 city-count
 0
@@ -229,6 +274,32 @@ use-ls?
 1
 1
 -1000
+
+SWITCH
+7
+92
+123
+125
+use-gis?
+use-gis?
+0
+1
+-1000
+
+SLIDER
+3
+169
+175
+202
+coastal-flows
+coastal-flows
+0
+1
+0.1
+.1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
