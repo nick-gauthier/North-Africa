@@ -223,11 +223,10 @@ end
 
 
 to setup-villages  ; create villages, then have each village create and initialize households
-  ;create-villages ifelse-value dev-mode? [1] [init-villages] [
+  if dev-mode? [ create-villages 1 [
 
-   ; ifelse dev-mode?
-     ; [ move-to patch 49 49 ]
-   ; [ move-to one-of active-patches with [ slope-val  >= 0.75 ] ] ; move villages to random locations
+    if dev-mode? [ move-to patch 49 49 ]
+  ]]
 
 ask villages [
     ht  ; hide the village turtles
@@ -668,9 +667,7 @@ end
 
 to regrow-patch ; restore patch vegetation and soil fertility
   ask active-patches [
-
-    if fertility < 100 [ set fertility fertility + random-normal 2 .5 ] ; restore fertility by restoration rate, with some noise
-    if fertility > 100 [ set fertility 100 ]                            ; fertility can't excede 100
+    set fertility fertility + 0.05 * fertility * (fertility / 100) ^ 0 * (1 - fertility / 100)
 
     ;restore vegetation on unfarmed, unsettled patches
     if field? = FALSE and settlement? = FALSE [
@@ -693,11 +690,11 @@ end
 GRAPHICS-WINDOW
 286
 10
-1340
-564
+794
+519
 -1
 -1
-1.0
+5.0
 1
 10
 1
@@ -708,9 +705,9 @@ GRAPHICS-WINDOW
 0
 1
 0
-1045
+99
 0
-544
+99
 1
 1
 1
@@ -821,7 +818,7 @@ CHOOSER
 tenure
 tenure
 "none" "satisficing" "maximizing"
-2
+1
 
 PLOT
 724
@@ -968,7 +965,7 @@ SWITCH
 514
 dev-mode?
 dev-mode?
-1
+0
 1
 -1000
 
@@ -1039,7 +1036,7 @@ precip-CV
 precip-CV
 0
 .9
-0.3
+0.0
 .1
 1
 NIL
