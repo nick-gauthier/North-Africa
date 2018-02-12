@@ -1,0 +1,94 @@
+---
+title: "Surface Data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Creation of surface datasets for Roman LULCC simulations
+
+## Setup
+Import necessary packages
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+#devtools::install_github("bergant/nlexperiment")
+library(nlexperiment)
+nl_netlogo_path('/home/nick/Netlogo/NetLogo 6.0.2/app/') 
+```
+
+
+```{r}
+experiment <- nl_experiment( 
+  model_file = '/home/nick/gdrive/Projects/North-Africa/cities-nw-calib.nlogo',
+  iterations = 200,
+  param_values = nl_param_lhs(
+    n = 100, 
+    `city-count` = 100,
+    coastal_flows = .25,#c(0, 1),
+    alpha = c(0.85, 1.15),
+    beta = c(20, 60)
+  ),
+  mapping = c(coastal_flows = 'coastal-flows'),
+  agents_after = list(
+    individuals = agent_set(
+      vars = c('name', 'population'),
+      agents = 'cities'
+    )
+  ),
+  random_seed = 1
+)  
+```
+
+```{r}
+result <- nl_run(experiment, parallel = T)
+```
+```{r}
+result
+```
+```{r}
+cities <- read.csv('data/NA_cities.csv') %>%
+  mutate(population = 41.834 * Size ^ 1.3361) %>%
+  select(Name, population) %>%
+  filter(!is.na(population)) %>%
+  mutate(pop_normalized = population / mean(population)) %>%
+  select(-population)
+```
+
+```{r}
+results <- nl_get_result(result, type = 'agents_after', sub_type = 'individuals') %>%
+  select(-c(`city-count`, run_id)) %>%
+  right_join(cities, by = c('name' = 'Name')) %>%
+  mutate(sq.error = (population - pop_normalized) ^ 2) %>%
+  group_by(coastal_flows, alpha, beta) %>%
+  summarise(rmse = sqrt(mean(sq.error)))
+
+
+
+
+ggplot(results, aes(coastal_flows, rmse)) + geom_col()
+
+results %>%
+  filter(coastal_flows < .25) %>%
+ggplot(aes(alpha, beta, color = rmse)) +
+  geom_point()
+
+results %>%
+  filter(coastal_flows < .25) %>%
+ggplot(aes(alpha, beta, z = rmse, fill = rmse)) +
+  geom_density2d(aes(color = ..level..))
+
+results %>% filter(coastal_flows < .25)
+```
+
+
+```{r}
+test <-nl_get_result(result, type = 'agents_after', sub_type = 'individuals')
+summary(test)
+```
+
