@@ -1,0 +1,47 @@
+---
+title: "CLMCrop_emulator"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(raster)
+library(tidyverse)
+```
+
+Import climate drivers. Subset to years before 2005, and combine monthly observations into annual ones.
+```{r}
+years <- as.factor(1901:2005)
+
+prec <- brick('data/CRU/cru_ts4.01.1901.2016.pre.dat.nc') %>%
+  .[[1:1260]] %>%
+  stackApply(rep(1:105, each = 12), sum, na.rm = F) %>%
+  setNames(years)
+
+temp <- brick('data/CRU/cru_ts4.01.1901.2016.tmp.dat.nc') %>%
+  .[[1:1260]] %>%
+  stackApply(rep(1:105, each = 12), mean, na.rm = F) %>%
+  setNames(years)
+```
+
+```{r}
+yield <- brick('~/CLM Data/wheat_historical_co2_rf_nofert_0.5x0.5.nc') %>%
+  setNames(years) %>%
+  mask(temp[[1]])
+```
+
+```{r}
+plot(brick(c(yield[[1]], temp[[1]], prec[[1]])) %>% crop(extent(-100, -50, 0, 50)))
+
+dat <- bind_rows(as.data.frame(prec, na.rm = T, long = T, xy = T) %>% rename(prec = value),
+                 as.data.frame(temp, na.rm = T, long = T, xy = T) %>% rename(temp = value),
+                 as.data.frame(yield, na.rm = T, long = T, xy = T) %>% rename(yield = value)) %>%
+  as.tibble %>%
+  dplyr::select(year = layer, x, y, prec, temp, yield)
+
+dat$temp %>% summary
+```
+
