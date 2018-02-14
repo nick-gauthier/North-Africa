@@ -26,15 +26,14 @@ nl_netlogo_path('/home/nick/Netlogo/NetLogo 6.0.2/app/')
 ```{r}
 experiment <- nl_experiment( 
   model_file = '/home/nick/gdrive/Projects/North-Africa/cities-nw-calib.nlogo',
-  iterations = 200,
-  param_values = nl_param_lhs(
-    n = 100, 
-    `city-count` = 100,
-    coastal_flows = .25,#c(0, 1),
-    alpha = c(0.85, 1.15),
-    beta = c(20, 60)
+  while_condition = 'ticks < sim-length',
+  param_values = list(
+    sim_length = seq(100, 500, 100),
+    coastal_flows = seq(0, 1, 0.1),
+    alpha = seq(0.85, 1.15, .05),
+    beta = seq(20, 60, 5)
   ),
-  mapping = c(coastal_flows = 'coastal-flows'),
+  mapping = c(coastal_flows = 'coastal-flows', sim_length = 'sim-length'),
   agents_after = list(
     individuals = agent_set(
       vars = c('name', 'population'),
@@ -48,9 +47,7 @@ experiment <- nl_experiment(
 ```{r}
 result <- nl_run(experiment, parallel = T)
 ```
-```{r}
-result
-```
+
 ```{r}
 cities <- read.csv('data/NA_cities.csv') %>%
   mutate(population = 41.834 * Size ^ 1.3361) %>%
@@ -62,33 +59,35 @@ cities <- read.csv('data/NA_cities.csv') %>%
 
 ```{r}
 results <- nl_get_result(result, type = 'agents_after', sub_type = 'individuals') %>%
-  select(-c(`city-count`, run_id)) %>%
+  select(-run_id) %>%
   right_join(cities, by = c('name' = 'Name')) %>%
-  mutate(sq.error = (population - pop_normalized) ^ 2) %>%
-  group_by(coastal_flows, alpha, beta) %>%
-  summarise(rmse = sqrt(mean(sq.error)))
-
-
-
-
-ggplot(results, aes(coastal_flows, rmse)) + geom_col()
-
-results %>%
-  filter(coastal_flows < .25) %>%
-ggplot(aes(alpha, beta, color = rmse)) +
-  geom_point()
-
-results %>%
-  filter(coastal_flows < .25) %>%
-ggplot(aes(alpha, beta, z = rmse, fill = rmse)) +
-  geom_density2d(aes(color = ..level..))
-
-results %>% filter(coastal_flows < .25)
+  mutate(abs.error = abs(population - pop_normalized)) %>%
+  group_by(coastal_flows, sim_length, alpha, beta) %>%
+  summarise(mae = mean(sq.error))
 ```
 
 
 ```{r}
-test <-nl_get_result(result, type = 'agents_after', sub_type = 'individuals')
-summary(test)
+ggplot(results, aes(mae)) + geom_density()
+
+qplot(as.factor(sim_length), mae, data = results, geom = 'boxplot')
+qplot(as.factor(alpha), mae, data = results, geom = 'boxplot')
+qplot(as.factor(beta), mae, data = results, geom = 'boxplot')
+qplot(as.factor(coastal_flows), mae, data = results, geom = 'boxplot')
+```
+
+
+```{r}
+results %>%
+  filter(coastal_flows == .1, sim_length == 100) %>%
+ggplot(aes(alpha, beta, fill = mae)) +
+  geom_raster()
+```
+
+
+```{r}
+results %>%
+  filter(mae < 2) %>%
+  ggplot(aes(sim_length)) + geom_density()
 ```
 
