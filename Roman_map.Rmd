@@ -1,7 +1,7 @@
 ---
 title: "Mapping Roman North Africa"
-author: "Nick"
-date: "6/8/2017"
+author: "Nick Gauthier"
+date: 
 output: 
   html_document: 
     keep_md: yes
@@ -10,6 +10,9 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+## Import and setup
+Load required packages
 ```{r}
 library(raster)
 library(rgdal)
@@ -19,13 +22,64 @@ library(tidyverse)
 library(stringr)
 library(pleiades)
 ```
-
-Import SRTM basemap
+Define map extent.
 ```{r}
 bbox <- extent(-10, 20, 28, 38)
 bbox <- extent(-4, 18, 30, 38)
 ```
+## Elevation Data
+Get country boundaries for spain, portugal, and italy to mask out from elevation
+```{r}
+euro.mask <- rbind(getData('GADM', country = 'PRT', level = 0),
+                   getData('GADM', country = 'ESP', level = 0),
+                   getData('GADM', country = 'ITA', level = 0))
+```
 
+First download and mosaic 90m srtm tiles over the study area.
+```{r}
+#getData('SRTM', lon = -8, lat = 35)
+#getData('SRTM', lon = -3, lat = 35)
+#getData('SRTM', lon = 2, lat = 35)
+getData('SRTM', lon = 7, lat = 35)
+getData('SRTM', lon = 12, lat = 35, path = 'data/')
+#getData('SRTM', lon = -8, lat = 40)
+#getData('SRTM', lon = -3, lat = 40)
+#getData('SRTM', lon = 2, lat = 40)
+getData('SRTM', lon = 7, lat = 40, path = 'data')
+getData('SRTM', lon = 12, lat = 40, path = 'data')
+
+
+
+srtm <- list.files(pattern = '*.tif', recursive = T) %>% 
+  lapply(raster) %>% 
+  do.call(merge, .) #%>%
+  mask(euro.mask, inverse = T)
+
+writeRaster(srtm, 'srtm_na.tif')
+srtm <- raster('data/srtm_na.tif')
+```
+
+```{r}
+plot(srtm)
+```
+
+```{r}
+slope <- terrain(srtm, opt = 'slope', filename = 'slope.tif', overwrite = T)
+aspect <- terrain(srtm, opt = 'aspect', filename = 'aspect.tif', overwrite = T)
+TPI <- terrain(srtm, opt = 'TPI', filename = 'TPI.tif', overwrite = T)
+TRI <- terrain(srtm, opt = 'TRI', filename  = 'TRI.tif', overwrite = T)
+roughness <- terrain(srtm, opt = 'roughness', filename = 'roughness.tif', overwrite = T)
+flowdir <- terrain(srtm, opt = 'flowdir', filename = 'flowdir.tif', overwrite = T)
+```
+
+```{r}
+plot(slope)
+plot(aspect)
+plot(TPI)
+plot(TRI)
+plot(roughness)
+plot(flowdir)
+```
 
 ```{r}
 cities <- read.csv('data/NA_cities.csv') %>%
@@ -37,21 +91,23 @@ cities <- read.csv('data/NA_cities.csv') %>%
 max(cities$pop_est)
   coordinates(cities) <- ~lon + lat
 shapefile(cities, filename = 'NA_cities')
+
+
 ```
 
 
 
 ```{r}
-roads <- readOGR('Data/Shapefiles/ba_roads.shp') %>%
+roads <- readOGR('data/Shapefiles/ba_roads.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
   crop(bbox) %>%
   fortify
 
-aqueducts <- readOGR('Data/Shapefiles/aqueducts.shp') %>%
+aqueducts <- readOGR('data/Shapefiles/aqueducts.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
   crop(bbox)
 
-centuriation <- readOGR('Data/Shapefiles/centuriation_polygons.shp') %>%
+centuriation <- readOGR('data/Shapefiles/centuriation_polygons.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
   crop(bbox)
 ```
@@ -151,6 +207,17 @@ ggplot(aes(lon, lat)) +
   geom_point(data = cities, aes(lon, lat, size = pop_est), color = 'white') +
   scale_size_area()
 ```
+Reproject and save out shapefile
+```{r}
+settlements <- places %>% filter(str_detect(type, 'settlement'))
+coordinates(settlements) <- ~lon + lat
+proj4string(settlements) <- '+proj=longlat'
+settlements <- spTransform(settlements, CRS("+proj=lcc +lat_1=43 +lat_2=62 +lat_0=30 +lon_0=10 +x_0=0 +y_0=0 +ellps=intl +units=m +no_defs"))
+
+shapefile(settlements, filename = 'data/netlogo/settlements')
+```
+
+
 Compare to environmental covariates
 ```{r, eval=FALSE, include=FALSE}
 srtm <- raster('Data/SRTM_NE_250m_TIF/SRTM_NE_250m.tif') %>%
@@ -186,7 +253,8 @@ ggplot(env, aes(x = key, y = value)) +
 library(gdistance)
 srtm <- raster('data/netlogo/elev.asc')
 projection(srtm) <- '+proj=lcc +lat_1=43 +lat_2=62 +lat_0=30 +lon_0=10 +x_0=0 +y_0=0 +ellps=intl +units=m +no_defs'
-srtm
+
+
 altDiff <- function(x){x[2] - x[1]}
 hd <- transition(srtm, altDiff, 16, symm=FALSE)
 cell.targets <- Which(!is.na(srtm), cells = T)
