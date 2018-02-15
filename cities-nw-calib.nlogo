@@ -68,7 +68,7 @@ to setup-cities
     set size 1
     set attractiveness 1
     set color blue
-    create-links-from other cities [ hide-link ]
+    create-links-to min-n-of 10 other cities [distance myself] [ hide-link ]
   ]
   update-population
 end
@@ -101,7 +101,7 @@ to update-attractiveness
   ask cities [
     let in-flows sum [ flow ] of my-in-links
     if coastal? [set in-flows in-flows + in-flows * coastal-flows]
-    set attractiveness attractiveness + dt * (in-flows - attractiveness) * attractiveness
+    set attractiveness attractiveness + dt * (in-flows - attractiveness)
   ]
 end
 
@@ -208,7 +208,7 @@ alpha
 alpha
 .85
 1.15
-0.93
+1.05
 .01
 1
 NIL
@@ -223,7 +223,7 @@ beta
 beta
 20
 60
-25.0
+20.0
 5
 1
 NIL
@@ -240,21 +240,6 @@ Scaling Parameters
 1
 
 SLIDER
-4
-131
-176
-164
-city-count
-city-count
-0
-100
-100.0
-5
-1
-NIL
-HORIZONTAL
-
-SLIDER
 3
 169
 175
@@ -265,6 +250,21 @@ coastal-flows
 1
 0.1
 .1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+11
+99
+183
+132
+sim-length
+sim-length
+100
+1000
+100.0
+100
 1
 NIL
 HORIZONTAL
