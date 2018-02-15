@@ -24,8 +24,7 @@ library(pleiades)
 ```
 Define map extent.
 ```{r}
-bbox <- extent(-10, 20, 28, 38)
-bbox <- extent(-4, 18, 30, 38)
+bbox <- extent(5, 11.5, 34, 37.5)
 ```
 ## Elevation Data
 Get country boundaries for spain, portugal, and italy to mask out from elevation
@@ -57,6 +56,8 @@ srtm <- list.files(pattern = '*.tif', recursive = T) %>%
 
 writeRaster(srtm, 'srtm_na.tif')
 srtm <- raster('data/srtm_na.tif')
+srtm <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
+plot(srtm)
 ```
 
 ```{r}
@@ -80,17 +81,26 @@ plot(TRI)
 plot(roughness)
 plot(flowdir)
 ```
+```{r cache = T}
+dist_coast <- srtm %>%
+  reclassify(c(-Inf, Inf, NA, NA, NA, 1)) %>% # reverse NA and non-NA cells
+  distance(doEdge = T) %>% # calculate the distances
+  mask(srtm) %>% # mask out ocean cells  
+  `/`(1000) # convert to km
+plot(dist_coast < 2)
+```
 
 ```{r}
 cities <- read.csv('data/NA_cities.csv') %>%
   group_by(BA_rank) %>% 
   mutate(size_est = ifelse(is.na(Size), mean(Size, na.rm=TRUE), Size)) %>%
+  ungroup %>%
   mutate(population = 41.834 * Size^1.3361, pop_est = 41.834 * size_est^1.3361) %>%
-  filter(between(lat, 30, 38) & between(lon, -4, 18))
+  filter(between(lat, ymin(srtm), ymax(srtm)) & between(lon, xmin(srtm), xmax(srtm))) %>%
+  mutate(coastal = (1 >= raster::extract(dist_coast, cbind(lon, lat))))
 
-max(cities$pop_est)
-  coordinates(cities) <- ~lon + lat
-shapefile(cities, filename = 'NA_cities')
+#coordinates(cities) <- ~lon + lat
+#shapefile(cities, filename = 'NA_cities')
 
 
 ```
@@ -109,69 +119,79 @@ aqueducts <- readOGR('data/Shapefiles/aqueducts.shp') %>%
 
 centuriation <- readOGR('data/Shapefiles/centuriation_polygons.shp') %>%
   spTransform(CRS('+proj=longlat')) %>%
-  crop(bbox)
+  crop(bbox) %>%
+  fortify
 ```
 
 ```{r}
 ggplot(cities, aes(lon, lat)) +
-  geom_path(data = roads, aes(long, lat, group = group), color = 'lightgrey') + #alpha = .5) +
+  geom_path(data = roads, aes(long, lat, group = group), color = 'lightgrey') +
   geom_point(aes(size = pop_est * 10)) +
   scale_size_area() +
-  #scale_color_viridis() +
   theme_void() +
   coord_fixed() + theme(legend.position="none")
 
 ggsave('roman_network.png')
 ```
-
 ```{r}
-with(cities, cities[rep(1:nrow(cities), pop_est),]) %>%
-ggplot(aes(lon, lat)) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
-  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+gplot(roughness) +
+  geom_tile(aes(fill = value)) +
+    geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'lightgrey') +
   scale_fill_viridis() +
-  coord_fixed() +
-  theme_void()
+  coord_equal()
 ```
 
-```{r}
-with(cities, cities[rep(1:nrow(cities), pop_est),]) %>%
-ggplot(aes(lon, lat)) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
-  geom_path(data = centuriation, aes(long, lat, group = group), alpha = .5, color = 'white') +
-  scale_fill_viridis() +
-  coord_fixed() +
-  theme_void()
-```
-
-  
 ```{r}
 places <- pl_search_places() %>%
   filter(locationPrecision == 'precise') %>%
   select(title, type = featureTypes, description, 
          lon = reprLong, lat = reprLat, 
          periods = timePeriods, minDate, maxDate, id, tags) %>%
-  filter(between(lat, 28, 38) & between(lon, -10, 20)) %>%
   collect  %>%
+  filter(between(lat, ymin(srtm), ymax(srtm)) & between(lon, xmin(srtm), xmax(srtm))) %>%
   filter(str_detect(periods, 'R')) %>%
   print
-
-places %>% filter(str_detect(type, 'villa'))
+```
+Plot everything
+```{r}
+places %>% filter(str_detect(type, 'settlement|villa')) %>%
 ggplot(aes(lon, lat)) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
-  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, alpha = .8) +
+  geom_path(data = roads, aes(long, lat, group = group), color = 'lightgrey') +
   scale_fill_viridis() +
   coord_fixed() +
-  theme_void()
+  theme_void() +
+  geom_point(data = cities, aes(lon, lat, size = pop_est)) +
+  scale_size_area()
+```
 
+Settlements
+```{r}
 places %>% filter(str_detect(type, 'settlement')) %>%
 ggplot(aes(lon, lat)) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
-  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1, alpha = .8) +
+  geom_path(data = roads, aes(long, lat, group = group), color = 'lightgrey') +
   scale_fill_viridis() +
   coord_fixed() +
-  theme_void()
+  theme_void() +
+  geom_point(data = cities, aes(lon, lat, size = pop_est)) +
+  scale_size_area()
+```
+Villas
+```{r}
+places %>% filter(str_detect(type, 'villa')) %>%
+ggplot(aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1, alpha = .8) +
+  geom_path(data = roads, aes(long, lat, group = group), color = 'lightgrey') +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void() +
+  geom_point(data = cities, aes(lon, lat, size = pop_est)) +
+  scale_size_area()
+```
 
+Mines
+```{r}
 places %>% filter(str_detect(type, 'mine')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -179,7 +199,11 @@ ggplot(aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
+```
 
+
+Springs and oases
+```{r}
 places %>% filter(str_detect(type, 'spring')) %>%
 ggplot(aes(lon, lat)) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
@@ -195,18 +219,10 @@ ggplot(aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
-
-
-places %>% filter(str_detect(type, 'settlement')) %>%
-ggplot(aes(lon, lat)) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
-  geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'white') +
-  scale_fill_viridis() +
-  coord_fixed() +
-  theme_void() +
-  geom_point(data = cities, aes(lon, lat, size = pop_est), color = 'white') +
-  scale_size_area()
 ```
+
+
+
 Reproject and save out shapefile
 ```{r}
 settlements <- places %>% filter(str_detect(type, 'settlement'))
@@ -220,7 +236,7 @@ shapefile(settlements, filename = 'data/netlogo/settlements')
 
 Compare to environmental covariates
 ```{r, eval=FALSE, include=FALSE}
-srtm <- raster('Data/SRTM_NE_250m_TIF/SRTM_NE_250m.tif') %>%
+srtm <- raster('data/SRTM_NE_250m_TIF/SRTM_NE_250m.tif') %>%
   crop(bbox)
 
 slope <- terrain(srtm, opt = 'slope', unit = 'degrees')
@@ -236,25 +252,9 @@ rm(srtm, slope, aspect, TPI, TRI, roughness)
 plot(slope<9)
 ```
 
-```{r eval=FALSE, include=FALSE}
-prec <- brick('Data/CHELSA/prec.nc') %>% crop(bbox) %>% sum %>% resample(topo)
-levelplot(prec)
-
-env <- topo %>% raster::extract(cities[,8:9], df = T) %>% gather(key, value) %>% filter(key !='ID')
-
-ggplot(env, aes(x = key, y = value)) +
-  geom_boxplot()
-```
-
-
-
 
 ```{r eval=FALSE, include=FALSE}
 library(gdistance)
-srtm <- raster('data/netlogo/elev.asc')
-projection(srtm) <- '+proj=lcc +lat_1=43 +lat_2=62 +lat_0=30 +lon_0=10 +x_0=0 +y_0=0 +ellps=intl +units=m +no_defs'
-
-
 altDiff <- function(x){x[2] - x[1]}
 hd <- transition(srtm, altDiff, 16, symm=FALSE)
 cell.targets <- Which(!is.na(srtm), cells = T)
@@ -267,45 +267,83 @@ slope.c <- geoCorrection(hd, type = 'c')
 speed.c <- slope.c
 speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))
 Conductance.c <- geoCorrection(speed.c, type = 'c')
-
-test <- rowColFromCell(srtm, Which(srtm < 1000, cells = T))
-test[,2] <- test[,2] - 1
-test[,1] <- test[,1] * -1 + max(test[,1])
-test
-as.list(data.frame(t(test)))
 rm(slope.c, speed.c)
 ```
 
 ```{r eval=FALSE, include=FALSE}
-sites <- major %>%
+start_cities <- cities %>%
   select(lon, lat) %>%
   as.matrix
 
-acc <- accCost(Conductance.c, sites) %>%
+acc <- accCost(Conductance.c, start_cities) %>%
   mask(srtm)
 
-plot(acc/3600<3)
+acc %>%
+  `/`(3600) %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+ggplot(aes(x, y)) +
+  geom_tile(aes(fill = layer)) +
+  geom_polygon(data = centuriation, aes(long, lat, group = group), fill = 'lightgrey') +
+  theme_void() +
+  geom_point(data = places %>% filter(str_detect(type, 'settlement|villa')), aes(lon, lat), size = .5, alpha = .5) +
+    geom_path(data = roads, aes(long, lat, group = group), alpha = .1) +
+    geom_point(data = cities, aes(lon, lat, size = pop_est)) +
+  scale_fill_viridis(direction = -1) +
+  coord_quickmap() +
+  theme(legend.position="none")
 ```
 
+```{r}
+library(tidygraph)
+library(ggraph)
 
-Create conductance matrix with geocorrection for random walks
-```{r randomwalk_conductance, eval=FALSE, include=FALSE}
-slope.r <- geoCorrection(hd, type = 'r', scl =T)
-speed.r <- slope.r
-speed.r[adj] <- 6 * exp(-3.5 * abs(slope.r[adj] + 0.05))
-Conductance.r <- geoCorrection(speed.r, type = 'r', scl = T)
-rm(slope.r, speed.r, hd, adj)
+dist.mat <- costDistance(Conductance.c, start_cities) %>%
+  `/`(3600) %>%
+  as_tbl_graph(diagonal = F) %>%
+  mutate(name = cities$Name, population = 1, attractiveness = 1, x = cities$lon, y = cities$lat, pop = cities$population, pop_est = cities$pop_est, coastal = cities$coastal) %E>%
+  group_by(from) %>%
+  rename(distance = weight) %>%
+  filter(row_number(distance) <= 10) %>%
+  ungroup
+
+alpha <- 1.05
+beta <- .57
+coast_effect <- .1
+
+interact <- function(net){
+  net %E>%
+    mutate(interaction_strength = .N()$attractiveness[to] ^ alpha * exp(-beta * distance))  %>%
+    group_by(from) %>%
+    mutate(total_outflow = sum(interaction_strength)) %>%
+    ungroup %>% 
+    mutate(flow = .N()$population[from] * interaction_strength / total_outflow) %>%
+    group_by(to) %>%
+    mutate(inflow = sum(flow)) %>%
+    ungroup %N>%
+    mutate(inflow = .E()$inflow[name]) %>%
+    mutate(attractiveness = attractiveness + .01 * (inflow * coast_effect * coastal + inflow  - attractiveness)) %>%
+    mutate(population = 97 * attractiveness / sum(attractiveness))
+}
+
+net <- dist.mat
+for(i in 1:1000){
+  net <- interact(net)
+}
+
+
+ggraph(net, layout = 'manual', node.positions = as_tibble(activate(dist.mat, nodes))) +
+  geom_edge_link(alpha = .1) +
+  geom_node_point(aes(size = population)) +
+  scale_size_area() +
+  coord_quickmap() +
+  theme_void()
 ```
-
-
-```{r, eval=FALSE, include=FALSE}
-pas <- passage(Conductance.r, sites, sites, theta = 1)
-plot(pas)
+```{r}
+ggraph(net, layout = 'manual', node.positions = as_tibble(activate(dist.mat, nodes))) +
+  geom_edge_link(alpha = .1) +
+  geom_node_point(aes(size = pop_est / mean(pop_est))) +
+  scale_size_area() +
+  coord_quickmap() +
+  theme_void()
 ```
-
-```{r, eval=FALSE, include=FALSE}
-plot(c(cost_matrix), c(commute_matrix))
-```
-
-
 
