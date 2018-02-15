@@ -22,16 +22,25 @@ library(nlexperiment)
 nl_netlogo_path('/home/nick/Netlogo/NetLogo 6.0.2/app/') 
 ```
 
+```{r}
+cities <- read.csv('data/NA_cities.csv') %>%
+  mutate(population = 41.834 * Size ^ 1.3361) %>%
+  select(Name, population) %>%
+  filter(!is.na(population)) %>%
+  mutate(pop_normalized = population / mean(population)) %>%
+  select(-population)
+```
 
 ```{r}
 experiment <- nl_experiment( 
   model_file = '/home/nick/gdrive/Projects/North-Africa/cities-nw-calib.nlogo',
   while_condition = 'ticks < sim-length',
-  param_values = list(
-    sim_length = seq(100, 500, 100),
-    coastal_flows = seq(0, 1, 0.1),
-    alpha = seq(0.85, 1.15, .05),
-    beta = seq(20, 60, 5)
+  param_values = nl_param_lhs(
+    n = 500,
+    sim_length = c(100, 500),
+    coastal_flows = c(0, 1),
+    alpha = c(0.85, 1.15),
+    beta = c(20, 60)
   ),
   mapping = c(coastal_flows = 'coastal-flows', sim_length = 'sim-length'),
   agents_after = list(
@@ -45,17 +54,10 @@ experiment <- nl_experiment(
 ```
 
 ```{r}
-result <- nl_run(experiment, parallel = T)
+result <- nl_run(experiment, parallel = T, print_progress = T)
 ```
 
-```{r}
-cities <- read.csv('data/NA_cities.csv') %>%
-  mutate(population = 41.834 * Size ^ 1.3361) %>%
-  select(Name, population) %>%
-  filter(!is.na(population)) %>%
-  mutate(pop_normalized = population / mean(population)) %>%
-  select(-population)
-```
+
 
 ```{r}
 results <- nl_get_result(result, type = 'agents_after', sub_type = 'individuals') %>%
@@ -89,5 +91,30 @@ ggplot(aes(alpha, beta, fill = mae)) +
 results %>%
   filter(mae < 2) %>%
   ggplot(aes(sim_length)) + geom_density()
+```
+
+Optimization
+```{r}
+library(dfoptim)
+
+cl <- nl_eval_init(experiment, parallel = TRUE)
+trace <- nl_eval_tracer(verbose = FALSE)
+param_range <- nl_get_param_range(experiment)   
+set.seed(1) 
+
+o_result <- nmkb(
+  par = (param_range$upper + param_range$lower)/2,
+  fn = nl_eval_run, 
+    experiment = experiment, 
+    criteria = "eval_value", 
+    call_back = trace$add, 
+    parallel = TRUE, cluster = cl,
+    param_names = names(param_range$lower),
+  lower = param_range$lower, 
+  upper = param_range$upper, 
+  control = list(maxfeval = 200)
+)
+
+nl_eval_close(parallel = TRUE, cl)
 ```
 
