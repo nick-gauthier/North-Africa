@@ -348,3 +348,49 @@ ggraph(net, layout = 'manual', node.positions = as_tibble(activate(dist.mat, nod
   theme_void()
 ```
 
+```{r}
+
+costAll <- function(fromCoords, cost){
+  
+  aC <- srtm
+  for(i in 1:dim(fromCoords)[1]) {aC <- stack(aC, accCost(cost, fromCoords[i,]))}
+  aC <- dropLayer(aC,1)
+  alC <- calc(aC, which.min)
+  return(alC)
+}
+
+#https://stat.ethz.ch/pipermail/r-sig-geo/2011-July/012208.html
+  
+net %E>%
+ group_by(from) %>%
+  filter(flow == max(flow), .N()$population[from] < .N()$population[to]) %N>%
+  filter(node_is_sink()) %>%
+  as_tibble %>%
+  select(x, y) %>%
+  as.matrix %>%
+  costAll(Conductance.c) %>%
+  mask(srtm) %>%
+  `/`(3600) %>%
+  plot
+
+test <- cities %>%
+ select(lon, lat) %>%
+  as.matrix %>%
+  costAll(Conductance.c) %>%
+  mask(srtm) %>%
+  `/`(3600) %>%
+  rasterToPolygons
+
+  
+  as.data.frame(xy = T, na.rm = T) %>%
+ggplot(aes(x, y)) +
+  geom_tile(aes(fill = layer)) +
+  theme_void() +
+  geom_point(data = places %>% filter(str_detect(type, 'settlement|villa')), aes(lon, lat), size = .5, alpha = .5) +
+    geom_path(data = roads, aes(long, lat, group = group), alpha = .1) +
+    geom_point(data = cities, aes(lon, lat, size = pop_est)) +
+  scale_fill_viridis(direction = -1) +
+  coord_quickmap() +
+  theme(legend.position="none")
+```
+
