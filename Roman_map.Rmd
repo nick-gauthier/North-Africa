@@ -306,38 +306,39 @@ dist.mat <- costDistance(Conductance.c, start_cities) %>%
   filter(row_number(distance) <= 10) %>%
   ungroup
 
-alpha <- 1.05
-beta <- .57
-coast_effect <- .1
 
 interact <- function(net){
   net %E>%
-    mutate(interaction_strength = .N()$attractiveness[to] ^ alpha * exp(-beta * distance))  %>%
-    group_by(from) %>%
-    mutate(total_outflow = sum(interaction_strength)) %>%
-    ungroup %>% 
-    mutate(flow = .N()$population[from] * interaction_strength / total_outflow) %>%
-    group_by(to) %>%
-    mutate(inflow = sum(flow)) %>%
-    ungroup %N>%
-    mutate(inflow = .E()$inflow[name]) %>%
+    mutate(interaction_strength = .N()$attractiveness[to] ^ alpha * exp(-beta * distance))  %N>%
+    mutate(outflow = population / centrality_degree(weights = interaction_strength, mode = 'out', loops = F)) %E>%
+    mutate(flow = .N()$outflow[from] * interaction_strength) %N>%
+    mutate(inflow = centrality_degree(weights = flow, mode = 'in', loops = F)) %>%
     mutate(attractiveness = attractiveness + .01 * (inflow * coast_effect * coastal + inflow  - attractiveness)) %>%
     mutate(population = 97 * attractiveness / sum(attractiveness))
 }
 
+alpha <- 1.05
+beta <- .57
+coast_effect <- .1
+
 net <- dist.mat
-for(i in 1:1000){
+for(i in 1:500){
   net <- interact(net)
 }
 
-
-ggraph(net, layout = 'manual', node.positions = as_tibble(activate(dist.mat, nodes))) +
-  geom_edge_link(alpha = .1) +
-  geom_node_point(aes(size = population)) +
+net %E>%
+ group_by(from) %>%
+  filter(flow == max(flow), .N()$population[from] < .N()$population[to]) %N>%
+  mutate(terminal = node_is_sink()) %>%
+ggraph(layout = 'manual', node.positions = as_tibble(activate(dist.mat, nodes))) +
+  geom_edge_link(alpha = .6) +
+  geom_node_point(aes(size = population, color = terminal)) +
   scale_size_area() +
   coord_quickmap() +
   theme_void()
 ```
+
+
 ```{r}
 ggraph(net, layout = 'manual', node.positions = as_tibble(activate(dist.mat, nodes))) +
   geom_edge_link(alpha = .1) +
