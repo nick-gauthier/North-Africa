@@ -333,6 +333,7 @@ net %E>%
 ggraph(layout = 'manual', node.positions = as_tibble(activate(dist.mat, nodes))) +
   geom_edge_link(alpha = .6) +
   geom_node_point(aes(size = population, color = terminal)) +
+ # geom_node_label(aes(label = name)) +
   scale_size_area() +
   coord_quickmap() +
   theme_void()
@@ -349,7 +350,7 @@ ggraph(net, layout = 'manual', node.positions = as_tibble(activate(dist.mat, nod
 ```
 
 ```{r}
-
+library(sf)
 costAll <- function(fromCoords, cost){
   
   aC <- srtm
@@ -361,7 +362,7 @@ costAll <- function(fromCoords, cost){
 
 #https://stat.ethz.ch/pipermail/r-sig-geo/2011-July/012208.html
   
-net %E>%
+cum.cost <- net %E>%
  group_by(from) %>%
   filter(flow == max(flow), .N()$population[from] < .N()$population[to]) %N>%
   filter(node_is_sink()) %>%
@@ -369,28 +370,39 @@ net %E>%
   select(x, y) %>%
   as.matrix %>%
   costAll(Conductance.c) %>%
-  mask(srtm) %>%
-  `/`(3600) %>%
-  plot
+  mask(srtm) 
+
+
+terminal <- net %E>%
+ group_by(from) %>%
+  filter(flow == max(flow), .N()$population[from] < .N()$population[to]) %>%
+    ungroup %N>%
+    mutate(terminal = group_components()) %>%
+  as_tibble %>%
+  select(terminal) %>%
+    cbind(1:97, .)
 
 test <- cities %>%
  select(lon, lat) %>%
   as.matrix %>%
   costAll(Conductance.c) %>%
   mask(srtm) %>%
-  `/`(3600) %>%
-  rasterToPolygons
+  reclassify(terminal) %>%
+  rasterToPolygons(dissolve = T) %>% 
+  fortify
 
-  
-  as.data.frame(xy = T, na.rm = T) %>%
-ggplot(aes(x, y)) +
-  geom_tile(aes(fill = layer)) +
+
+
+test %>% fortify %>%
+ggplot(aes(long, lat)) +
+  geom_path(aes(group = group), alpha = .5) +
   theme_void() +
-  geom_point(data = places %>% filter(str_detect(type, 'settlement|villa')), aes(lon, lat), size = .5, alpha = .5) +
-    geom_path(data = roads, aes(long, lat, group = group), alpha = .1) +
+  #geom_point(data = places %>% filter(str_detect(type, 'settlement|villa')), aes(lon, lat), size = .5, alpha = .5) +
+    #geom_path(data = roads, aes(long, lat, group = group), alpha = .1) +
     geom_point(data = cities, aes(lon, lat, size = pop_est)) +
   scale_fill_viridis(direction = -1) +
   coord_quickmap() +
   theme(legend.position="none")
+
 ```
 
