@@ -114,12 +114,19 @@ create.households <- function(x){
          inhabitants = init_inhabitants,
          storage = inhabitants * calorie.req,
          food.ratio = 1) %>%
-    mutate(inhabitants = map(inhabitants, ~tibble(age = rep(25, .x))))
+    mutate(inhabitants = map(inhabitants, create.inhabitants))
+}
+
+create.inhabitants <- function(x){
+  tibble(age = rep(25, x))
 }
 
 population <- tibble(settlement = 1:init_settlements,
               households = init_households) %>%
               mutate(households = map(households, create.households))
+population
+population$households[[1]]$inhabitants[[1]]
+
 ```
 
 
@@ -136,6 +143,23 @@ eat <- function(households, harvest){
 }
 ```
 
+```{r birth-death}
+fertility_table <- tibble(
+  age = seq(10, 45, 5),
+  rate = c(0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134)
+)
+
+mortality_table <- tibble(
+  age = c(0, 1, seq(5, 80, 5)),
+  rate = c(0.4669, 0.0702, 0.0132, 0.0099, 0.0154, 0.0172, 0.0195, 0.0223, 0.0259, 0.0306, 0.0373, 0.0473, 0.0573, 0.0784, 0.1042, 0.1434, 0.2039, 0.2654)
+)
+
+ggplot(mortality_table, aes(age, rate)) +
+  geom_line(color = 'red') +
+  geom_line(data = fertility_table, color = 'blue') +
+  labs(title = 'Fertility and Mortality Rates', subtitle = 'Per capita fertility (blue) and mortality (red) in the Roman Empire', x = 'Age', y = 'Vital rate') +
+  theme_bw()
+```
 
 ```{r}
 carrying.capacity <- 100
