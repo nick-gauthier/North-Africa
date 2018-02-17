@@ -7,35 +7,163 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r}
+library(tidyverse)
+library(raster)
+library(mgcv)
+```
+
+```{r}
+bbox <- extent(5, 11.5, 34, 37.5)
+```
+
+```{r}
+elev <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
+elev_dat <- as.data.frame(elev, xy =  T, na.rm = T) %>%
+  rename(elev = SRTM_1km)
+
+ggplot(elev_dat, aes(x, y)) +
+  geom_raster(aes(fill = elev)) +
+  scale_fill_gradientn(colours = terrain.colors(10), name = 'Meters') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Elevation', subtitle = 'Africa Proconsularis')
+```
+
+```{r}
+slope <- terrain(srtm, opt = 'slope', unit = 'degrees')
+slope_dat <- as.data.frame(slope, xy = T, na.rm = T)
+
+ggplot(slope_dat, aes(x, y)) +
+  geom_raster(aes(fill = slope)) +
+  scale_fill_viridis(name = 'Degrees', option = 'B') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Slope', subtitle = 'Africa Proconsularis')
+```
+
+```{r}
+focalWeight(slope < 5, 0.008333333 * 2, type = 'circle') %>%
+  focal(slope < 5, ., sum) %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x, y)) +
+  geom_raster(aes(fill = layer)) +
+  scale_fill_viridis(name = 'Proportion \narable land') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Arable land', subtitle = 'Africa Proconsularis')
+```
+
+```{r climate, cache = T}
+import_chelsa <- function(x){
+  list.files(x, full.names = T) %>% 
+  stack %>%
+  crop(bbox) %>%
+  .[[c(1,5:12, 2:4)]]
+}
+prec <- import_chelsa('/media/nick/0327ee2a-8256-411c-8b81-4f099c20a7cf/CHELSA/prec/')
+temp <- import_chelsa('/media/nick/0327ee2a-8256-411c-8b81-4f099c20a7cf/CHELSA/temp/') %>%
+  `/`(10)
+
+levelplot(prec)
+levelplot(temp)
+```
+
+```{r}
+gdd5_interp <- function(x){
+  if(any(is.na(x))){return(NA)} else{
+    daily <- gam(x ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366))) %>%
+      predict.gam(data.frame(doy = 1:365)) 
+    daily[daily < 5] <- 5
+    return(sum(daily - 5))
+  }
+}
+
+doy <-c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349)
+```
+
+```{r eval = F}
+beginCluster(4)
+gdd5 <- clusterR(temp, calc, args = list(fun = gdd5_interp), export = 'doy')
+endCluster()
+writeRaster(gdd5, 'data/CHELSA/gdd5_1km.tif', overwrite = T)
+```
+
+```{r}
+gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
+rasterVis::levelplot(gdd5)
+```
+
+# Social Model
 ##Parameters
 ```{r}
 calorie.req <- 202.5 #212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
 seed.req <- 135  #108 # kg of wheat to sow a hectare
 yield <- seed.req * 4   # kg of wheat yield per hectare, based on 4:1 yields
-#urb.rate <- .15
+```
 
+Create a 2 villages of 10 households with 6 people in each.
+```{r}
+init_settlements <- 2 
+init_households <- 2
+init_inhabitants <- 6
+init_age <- 25
+
+create.households <- function(x){
+  tibble(household = 1:x,
+         inhabitants = init_inhabitants,
+         storage = inhabitants * calorie.req,
+         food.ratio = 1) %>%
+    mutate(inhabitants = map(inhabitants, ~tibble(age = rep(25, .x))))
+}
+
+population <- tibble(settlement = 1:init_settlements,
+              households = init_households) %>%
+              mutate(households = map(households, create.households))
+```
+
+
+
+
+```{r}
+eat <- function(households, harvest){
+  food.req <- calorie.req * nrow(inhabitants)
+  households %>%
+    mutate(food.ratio = (storage + harvest)/ food.req) %>%
+    mutate(old.storage = storage,
+           storage = if_else(food.req <= storage, harvest, max(harvest - (food.req - old.storage), 0))) %>%
+    dplyr::select(-old.storage)
+}
+```
+
+
+```{r}
+carrying.capacity <- 100
+degredation.factor <- 1
+regeneration.rate <- 0.0844
+depletion.rate <- 0.5
+production_elasticity <- 0.2
+
+soil.dynamics <- function(x, population){
+  x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
+}
+
+soil <- 100
+for(i in 1:100){
+  newsoil <- soil.dynamics(soil[i], 3)  
+  if(newsoil < 0){newsoil <- 0}
+  soil <- c(soil, newsoil)
+}
+plot(soil)
+```
+
+
+
+```{r}
 land.req <- function(population, rent = .3){
   produce <- yield - seed.req
   hectares <- calorie.req * population / (produce * (1 - rent)) 
   total.rent <- hectares * rent * produce
   return(data_frame(hectares, total.rent))
 }
-land.req(6, 0)
-land.req(6)
-
-
-24000000 * 6.75 * .001
-800000 * calorie.req * 0.001
-land.req(160000)$total.rent  * 0.001
 ```
-
-```{r}
-land.req.urb <- function(pop, rent = .3){
-  pop.req <- pop * calorie.req
-  produce <- yield - seed.req
-  hectares <- calorie.req * households * household.size / (produce * (1 - rent)) 
-  total.rent <- hectares * rent * produce
-  return(data_frame(hectares, total.rent))
-}
-```
-

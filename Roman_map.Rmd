@@ -35,7 +35,7 @@ euro.mask <- rbind(getData('GADM', country = 'PRT', level = 0),
 ```
 
 First download and mosaic 90m srtm tiles over the study area.
-```{r}
+```{r eval = F}
 #getData('SRTM', lon = -8, lat = 35)
 #getData('SRTM', lon = -3, lat = 35)
 #getData('SRTM', lon = 2, lat = 35)
@@ -56,6 +56,10 @@ srtm <- list.files(pattern = '*.tif', recursive = T) %>%
 
 writeRaster(srtm, 'srtm_na.tif')
 srtm <- raster('data/srtm_na.tif')
+```
+
+
+```{r}
 srtm <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
 plot(srtm)
 ```
@@ -64,7 +68,7 @@ plot(srtm)
 plot(srtm)
 ```
 
-```{r}
+```{r eval = F}
 slope <- terrain(srtm, opt = 'slope', filename = 'slope.tif', overwrite = T)
 aspect <- terrain(srtm, opt = 'aspect', filename = 'aspect.tif', overwrite = T)
 TPI <- terrain(srtm, opt = 'TPI', filename = 'TPI.tif', overwrite = T)
@@ -73,7 +77,7 @@ roughness <- terrain(srtm, opt = 'roughness', filename = 'roughness.tif', overwr
 flowdir <- terrain(srtm, opt = 'flowdir', filename = 'flowdir.tif', overwrite = T)
 ```
 
-```{r}
+```{r eval = F}
 plot(slope)
 plot(aspect)
 plot(TPI)
@@ -81,13 +85,19 @@ plot(TRI)
 plot(roughness)
 plot(flowdir)
 ```
-```{r cache = T}
+
+```{r cache = T, eval = F}
 dist_coast <- srtm %>%
   reclassify(c(-Inf, Inf, NA, NA, NA, 1)) %>% # reverse NA and non-NA cells
   distance(doEdge = T) %>% # calculate the distances
   mask(srtm) %>% # mask out ocean cells  
   `/`(1000) # convert to km
-plot(dist_coast < 2)
+writeRaster(dist_coast, 'data/topography/coast.tif')
+```
+
+```{r}
+dist_coast <- raster('data/topography/coast.tif')
+plot(dist_coast)
 ```
 
 ```{r}
@@ -133,7 +143,7 @@ ggplot(cities, aes(lon, lat)) +
 
 ggsave('roman_network.png')
 ```
-```{r}
+```{r eval = F}
 gplot(roughness) +
   geom_tile(aes(fill = value)) +
     geom_path(data = roads, aes(long, lat, group = group), alpha = .5, color = 'lightgrey') +
@@ -224,7 +234,7 @@ ggplot(aes(lon, lat)) +
 
 
 Reproject and save out shapefile
-```{r}
+```{r eval = F}
 settlements <- places %>% filter(str_detect(type, 'settlement'))
 coordinates(settlements) <- ~lon + lat
 proj4string(settlements) <- '+proj=longlat'
@@ -253,7 +263,7 @@ plot(slope<9)
 ```
 
 
-```{r eval=FALSE, include=FALSE}
+```{r cache = T}
 library(gdistance)
 altDiff <- function(x){x[2] - x[1]}
 hd <- transition(srtm, altDiff, 16, symm=FALSE)
@@ -262,7 +272,7 @@ adj <- adjacent(srtm, cells=cell.targets, target = cell.targets, pairs=TRUE, dir
 ```
 
 Create conductance matrix with geocorrection for lcps
-```{r lcp_conductance, eval=FALSE, include=FALSE}
+```{r lcp_conductance, cache = T}
 slope.c <- geoCorrection(hd, type = 'c')
 speed.c <- slope.c
 speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))
@@ -270,7 +280,7 @@ Conductance.c <- geoCorrection(speed.c, type = 'c')
 rm(slope.c, speed.c)
 ```
 
-```{r eval=FALSE, include=FALSE}
+```{r}
 start_cities <- cities %>%
   select(lon, lat) %>%
   as.matrix
@@ -319,7 +329,7 @@ interact <- function(net){
 
 alpha <- 1.05
 beta <- .57
-coast_effect <- .1
+coast_effect <- .5
 
 net <- dist.mat
 for(i in 1:500){
@@ -349,8 +359,7 @@ ggraph(net, layout = 'manual', node.positions = as_tibble(activate(dist.mat, nod
   theme_void()
 ```
 
-```{r}
-library(sf)
+```{r cache = T}
 costAll <- function(fromCoords, cost){
   
   aC <- srtm
@@ -371,8 +380,9 @@ cum.cost <- net %E>%
   as.matrix %>%
   costAll(Conductance.c) %>%
   mask(srtm) 
+```
 
-
+```{r}
 terminal <- net %E>%
  group_by(from) %>%
   filter(flow == max(flow), .N()$population[from] < .N()$population[to]) %>%
@@ -391,18 +401,24 @@ test <- cities %>%
   rasterToPolygons(dissolve = T) %>% 
   fortify
 
-
-
-test %>% fortify %>%
-ggplot(aes(long, lat)) +
-  geom_path(aes(group = group), alpha = .5) +
-  theme_void() +
-  #geom_point(data = places %>% filter(str_detect(type, 'settlement|villa')), aes(lon, lat), size = .5, alpha = .5) +
-    #geom_path(data = roads, aes(long, lat, group = group), alpha = .1) +
-    geom_point(data = cities, aes(lon, lat, size = pop_est)) +
-  scale_fill_viridis(direction = -1) +
+net %E>%
+ group_by(from) %>%
+  filter(flow == max(flow), .N()$population[from] < .N()$population[to]) %N>%
+  mutate(terminal = node_is_sink()) %>%
+ggraph(layout = 'manual', node.positions = as_tibble(activate(dist.mat, nodes))) +
+  geom_path(data = test, aes(long, lat, group = group), alpha = .1) +
+  geom_point(data = places %>% filter(str_detect(type, 'settlement|villa')), aes(lon, lat), size = .5, alpha = .2) +
+  geom_edge_link(alpha = .6) +
+  geom_node_point(aes(size = population, color = terminal)) +
+ # geom_node_label(aes(label = name)) +
+  scale_size_area() +
   coord_quickmap() +
+  theme_void() +
   theme(legend.position="none")
+
+```
+
+```{r}
 
 ```
 
