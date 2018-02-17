@@ -65,32 +65,47 @@ results <- nl_get_result(result, type = 'agents_after', sub_type = 'individuals'
   right_join(cities, by = c('name' = 'Name')) %>%
   mutate(abs.error = abs(population - pop_normalized)) %>%
   group_by(coastal_flows, sim_length, alpha, beta) %>%
-  summarise(mae = mean(sq.error))
+  summarise(mae = mean(abs.error))
 ```
 
 
 ```{r}
 ggplot(results, aes(mae)) + geom_density()
 
-qplot(as.factor(sim_length), mae, data = results, geom = 'boxplot')
-qplot(as.factor(alpha), mae, data = results, geom = 'boxplot')
-qplot(as.factor(beta), mae, data = results, geom = 'boxplot')
-qplot(as.factor(coastal_flows), mae, data = results, geom = 'boxplot')
+qplot(sim_length, mae, data = results, geom = 'point')
+qplot(alpha, mae, data = results, geom = 'point')
+qplot(beta, mae, data = results, geom = 'point')
+qplot(coastal_flows, mae, data = results, geom = 'point')
 ```
 
+Find the best performing runs
+```{r}
+summary(results$mae)
+```
 
 ```{r}
 results %>%
-  filter(coastal_flows == .1, sim_length == 100) %>%
-ggplot(aes(alpha, beta, fill = mae)) +
-  geom_raster()
+  filter(mae < 1.176) %>%
+  ggplot(aes(alpha, beta, color = mae)) +
+  geom_point()
 ```
 
-
+sim length of about 150
 ```{r}
 results %>%
-  filter(mae < 2) %>%
+  filter(mae < 1.176) %>%
   ggplot(aes(sim_length)) + geom_density()
+results %>%
+  filter(mae < 1.176) %>%
+  ggplot(aes(coastal_flows)) + geom_density()
+results %>%
+  filter(mae < 1.176) %>%
+  ggplot(aes(alpha)) + geom_density()
+results %>%
+  filter(mae < 1.176) %>%
+  ggplot(aes(beta)) + geom_density()
+
+filter(results, mae < 1.05)
 ```
 
 Optimization
