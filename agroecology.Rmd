@@ -92,6 +92,8 @@ writeRaster(gdd5, 'data/CHELSA/gdd5_1km.tif', overwrite = T)
 ```{r}
 gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
 rasterVis::levelplot(gdd5)
+
+plot(gdd5, mean(temp))
 ```
 
 # Social Model
@@ -160,6 +162,47 @@ ggplot(mortality_table, aes(age, rate)) +
   labs(title = 'Fertility and Mortality Rates', subtitle = 'Per capita fertility (blue) and mortality (red) in the Roman Empire', x = 'Age', y = 'Vital rate') +
   theme_bw()
 ```
+```{r vital-rate-elasticity}
+fertility_elasticity <- read_csv('data/fertility_data.csv', skip = 1) %>% 
+  rename(food_ratio = X, fertility_reduction = Y) %>%
+  gam(fertility_reduction ~ s(food_ratio), dat = .)
+
+mort_table <- read_csv('data/mortality_dataset.csv', skip = 1)
+
+mortality_elasticity <- bind_rows(
+  mort_table[1:2] %>%
+    mutate(age = 1) %>%
+    rename(food_ratio = X, mortality_reduction = Y),
+  mort_table[3:4] %>%
+    mutate(age = 25) %>%
+    rename(food_ratio = X_1, mortality_reduction = Y_1),
+  mort_table[5:6] %>%
+    mutate(age = 5) %>%
+    rename(food_ratio = X_2, mortality_reduction = Y_2),
+  mort_table[7:8] %>%
+    mutate(age = 65) %>%
+    rename(food_ratio = X_3, mortality_reduction = Y_3)) %>%
+  group_by(age) %>%
+  nest %>% 
+  mutate(model = map(data, ~gam(mortality_reduction ~ s(food_ratio), dat = .)))
+rm(mort_table) 
+
+plot(fertility_elasticity)
+map(mortality_elasticity$model, plot.gam)
+```
+
+```{r}
+test <- population$households[[1]]$inhabitants[[1]]
+test
+
+population$households
+
+fertility_table %>%
+  mutate(test = runif(n()),
+         )
+runif(1)
+```
+
 
 ```{r}
 carrying.capacity <- 100
