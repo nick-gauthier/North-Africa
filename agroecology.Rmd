@@ -115,7 +115,7 @@ create.households <- function(x){
   tibble(household = 1:x,
          inhabitants = init_inhabitants,
          storage = inhabitants * calorie.req,
-         food.ratio = 1) %>%
+         food_ratio = 1) %>%
     mutate(inhabitants = map(inhabitants, create.inhabitants))
 }
 
@@ -162,6 +162,7 @@ ggplot(mortality_table, aes(age, rate)) +
   labs(title = 'Fertility and Mortality Rates', subtitle = 'Per capita fertility (blue) and mortality (red) in the Roman Empire', x = 'Age', y = 'Vital rate') +
   theme_bw()
 ```
+
 ```{r vital-rate-elasticity}
 fertility_elasticity <- read_csv('data/fertility_data.csv', skip = 1) %>% 
   rename(food_ratio = X, fertility_reduction = Y) %>%
@@ -191,16 +192,22 @@ plot(fertility_elasticity)
 map(mortality_elasticity$model, plot.gam)
 ```
 
-```{r}
-test <- population$households[[1]]$inhabitants[[1]]
-test
-
-population$households
-
-fertility_table %>%
-  mutate(test = runif(n()),
-         )
-runif(1)
+```{r reproduction}
+reproduce <- function(inhabitants, food_ratio){
+  fertility_reduction <- predict(fertility_elasticity, list(food_ratio = food_ratio))
+  babies <- inhabitants %>%
+    filter(age >= 12 & age < 50) %>%   # only individuals of child bearing age reproduce
+    inner_join(fertility_table) %>%    # find the fertility rate corresponding to the individual's age
+    mutate(baby = if_else((rate / 2 * fertility_reduction) > runif(n()), 1, 0)) %>%  # divide by two to make everyone female ...
+    .$baby %>% # select just the babies column
+    sum  # add it up to determine the number of newborns in the house
+  if(babies > 0) inhabitants <- add_row(inhabitants, age = rep(0, babies))
+  return(inhabitants)
+}
+  
+test %>%
+  mutate(inhabitants = map2(inhabitants, food_ratio, reproduce), 
+         n = map_int(inhabitants, nrow))
 ```
 
 
