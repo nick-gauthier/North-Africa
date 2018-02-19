@@ -8,8 +8,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-library(tidyverse)
 library(raster)
+library(tidyverse)
 library(mgcv)
 ```
 
@@ -106,17 +106,17 @@ yield <- seed.req * 4   # kg of wheat yield per hectare, based on 4:1 yields
 
 Create a 2 villages of 10 households with 6 people in each.
 ```{r}
-init_settlements <- 2 
-init_households <- 2
+init_settlements <- 10 
+init_households <- 50
 init_inhabitants <- 6
 init_age <- 25
 
 create.households <- function(x){
   tibble(household = 1:x,
-         inhabitants = init_inhabitants,
-         storage = inhabitants * calorie.req,
+         n_inhabitants = init_inhabitants,
+         storage = n_inhabitants * calorie.req,
          food_ratio = 1) %>%
-    mutate(inhabitants = map(inhabitants, create.inhabitants))
+    mutate(inhabitants = map(n_inhabitants, create.inhabitants))
 }
 
 create.inhabitants <- function(x){
@@ -124,14 +124,18 @@ create.inhabitants <- function(x){
 }
 
 population <- tibble(settlement = 1:init_settlements,
-              households = init_households) %>%
+                     households = init_households) %>%
               mutate(households = map(households, create.households))
-population
-population$households[[1]]$inhabitants[[1]]
-
 ```
 
+Try an alternative way, instead of having nested lists, just have three tables with keys
+```{r}
+pop <- tibble(settlement = 1:init_settlements,
+                     households = init_households)
 
+population %>% unnest
+pop %>% mutate(map(households, create.households)) #%>% bind_rows
+```
 
 
 ```{r}
@@ -141,7 +145,7 @@ eat <- function(households, harvest){
     mutate(food.ratio = (storage + harvest)/ food.req) %>%
     mutate(old.storage = storage,
            storage = if_else(food.req <= storage, harvest, max(harvest - (food.req - old.storage), 0))) %>%
-    dplyr::select(-old.storage)
+    select(-old.storage)
 }
 ```
 
@@ -150,6 +154,7 @@ fertility_table <- tibble(
   age = seq(10, 45, 5),
   rate = c(0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134)
 )
+
 
 mortality_table <- tibble(
   age = c(0, 1, seq(5, 80, 5)),
@@ -170,44 +175,68 @@ fertility_elasticity <- read_csv('data/fertility_data.csv', skip = 1) %>%
 
 mort_table <- read_csv('data/mortality_dataset.csv', skip = 1)
 
-mortality_elasticity <- bind_rows(
-  mort_table[1:2] %>%
-    mutate(age = 1) %>%
-    rename(food_ratio = X, mortality_reduction = Y),
-  mort_table[3:4] %>%
-    mutate(age = 25) %>%
-    rename(food_ratio = X_1, mortality_reduction = Y_1),
-  mort_table[5:6] %>%
-    mutate(age = 5) %>%
-    rename(food_ratio = X_2, mortality_reduction = Y_2),
-  mort_table[7:8] %>%
-    mutate(age = 65) %>%
-    rename(food_ratio = X_3, mortality_reduction = Y_3)) %>%
+survivorship_elasticity <- bind_rows(
+    mort_table[1:2] %>% mutate(age = 1) %>% rename(food_ratio = X, mortality_reduction = Y), 
+    mort_table[3:4] %>% mutate(age = 25) %>% rename(food_ratio = X_1, mortality_reduction = Y_1),
+    mort_table[5:6] %>% mutate(age = 5) %>% rename(food_ratio = X_2, mortality_reduction = Y_2),
+    mort_table[7:8] %>% mutate(age = 65) %>% rename(food_ratio = X_3, mortality_reduction = Y_3)
+  ) %>%
   group_by(age) %>%
   nest %>% 
-  mutate(model = map(data, ~gam(mortality_reduction ~ s(food_ratio), dat = .)))
+  mutate(model = map(data, ~gam(mortality_reduction ~ s(food_ratio), dat = .))) %>%
+  select(-data)
 rm(mort_table) 
 
 plot(fertility_elasticity)
-map(mortality_elasticity$model, plot.gam)
+walk(survivorship_elasticity$model, plot, pages = 1)
 ```
 
 ```{r reproduction}
 reproduce <- function(inhabitants, food_ratio){
-  fertility_reduction <- predict(fertility_elasticity, list(food_ratio = food_ratio))
+  fertility_reduction <- ifelse(food_ratio >= 1, 1, predict(fertility_elasticity, list(food_ratio = food_ratio)))
+  
   babies <- inhabitants %>%
     filter(age >= 12 & age < 50) %>%   # only individuals of child bearing age reproduce
-    inner_join(fertility_table) %>%    # find the fertility rate corresponding to the individual's age
-    mutate(baby = if_else((rate / 2 * fertility_reduction) > runif(n()), 1, 0)) %>%  # divide by two to make everyone female ...
+    inner_join(fertility_table, by = 'age') %>%    # find the fertility rate corresponding to the individual's age
+    mutate(baby = (rate / 2 * fertility_reduction) > runif(n())) %>%  # divide by two to make everyone female ...
     .$baby %>% # select just the babies column
     sum  # add it up to determine the number of newborns in the house
+  
   if(babies > 0) inhabitants <- add_row(inhabitants, age = rep(0, babies))
   return(inhabitants)
 }
-  
-test %>%
-  mutate(inhabitants = map2(inhabitants, food_ratio, reproduce), 
-         n = map_int(inhabitants, nrow))
+```
+
+```{r}
+die <- function(inhabitants, food_ratio){
+  inhabitants %>%
+    inner_join(mortality_table, by = 'age') %>%
+    inner_join(survivorship_elasticity, by = 'age') %>%
+    mutate(survivorship_reduction = ifelse(food_ratio >= 1, 1, map_dbl(model, ~predict(.x, list(food_ratio = food_ratio)))),
+           dead = ((1 - rate) * survivorship_reduction) < runif(n())) %>%
+    filter(dead == F) %>%
+    select(age)
+}
+```
+
+
+```{r}
+birth_death <- function(household){
+  household %>%
+    mutate(inhabitants = map2(inhabitants, food_ratio, reproduce),
+           inhabitants = map2(inhabitants, food_ratio, die),
+           n_inhabitants = map_int(inhabitants, nrow)) %>%
+    filter(n_inhabitants > 0)
+}
+
+out <- c()
+
+pop.test <- population %>% unnest
+for(i in 1:100){
+  pop.test <- pop.test  %>% birth_death()
+  out <- c(out, pop.test %>% select(n_inhabitants) %>% sum)
+}
+
 ```
 
 
