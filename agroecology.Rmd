@@ -106,8 +106,8 @@ yield <- seed.req * 4   # kg of wheat yield per hectare, based on 4:1 yields
 
 Create a 2 villages of 10 households with 6 people in each.
 ```{r}
-init_settlements <- 10 
-init_households <- 50
+init_settlements <- 2 
+init_households <- 2
 init_inhabitants <- 6
 init_age <- 25
 
@@ -128,15 +128,6 @@ population <- tibble(settlement = 1:init_settlements,
               mutate(households = map(households, create.households))
 ```
 
-Try an alternative way, instead of having nested lists, just have three tables with keys
-```{r}
-pop <- tibble(settlement = 1:init_settlements,
-                     households = init_households)
-
-population %>% unnest
-pop %>% mutate(map(households, create.households)) #%>% bind_rows
-```
-
 
 ```{r}
 eat <- function(households, harvest){
@@ -151,14 +142,13 @@ eat <- function(households, harvest){
 
 ```{r birth-death}
 fertility_table <- tibble(
-  age = seq(10, 45, 5),
-  rate = c(0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134)
+  age = 10:49,
+  rate = rep(c(0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134), each = 5)
 )
 
-
 mortality_table <- tibble(
-  age = c(0, 1, seq(5, 80, 5)),
-  rate = c(0.4669, 0.0702, 0.0132, 0.0099, 0.0154, 0.0172, 0.0195, 0.0223, 0.0259, 0.0306, 0.0373, 0.0473, 0.0573, 0.0784, 0.1042, 0.1434, 0.2039, 0.2654)
+  age = c(0:84),
+  rate = c(0.4669, rep(0.0702, 4), rep(c(0.0132, 0.0099, 0.0154, 0.0172, 0.0195, 0.0223, 0.0259, 0.0306, 0.0373, 0.0473, 0.0573, 0.0784, 0.1042, 0.1434, 0.2039, 0.2654), each = 5))
 )
 
 ggplot(mortality_table, aes(age, rate)) +
@@ -167,28 +157,31 @@ ggplot(mortality_table, aes(age, rate)) +
   labs(title = 'Fertility and Mortality Rates', subtitle = 'Per capita fertility (blue) and mortality (red) in the Roman Empire', x = 'Age', y = 'Vital rate') +
   theme_bw()
 ```
+https://stackoverflow.com/questions/38237350/repeating-rows-of-data-frame-in-dplyr#comment63896747_38237805
 
 ```{r vital-rate-elasticity}
 fertility_elasticity <- read_csv('data/fertility_data.csv', skip = 1) %>% 
   rename(food_ratio = X, fertility_reduction = Y) %>%
   gam(fertility_reduction ~ s(food_ratio), dat = .)
 
-mort_table <- read_csv('data/mortality_dataset.csv', skip = 1)
+mort_elast <- read_csv('data/mortality_dataset.csv', skip = 1)
 
 survivorship_elasticity <- bind_rows(
-    mort_table[1:2] %>% mutate(age = 1) %>% rename(food_ratio = X, mortality_reduction = Y), 
-    mort_table[3:4] %>% mutate(age = 25) %>% rename(food_ratio = X_1, mortality_reduction = Y_1),
-    mort_table[5:6] %>% mutate(age = 5) %>% rename(food_ratio = X_2, mortality_reduction = Y_2),
-    mort_table[7:8] %>% mutate(age = 65) %>% rename(food_ratio = X_3, mortality_reduction = Y_3)
+    mort_elast[1:2] %>% mutate(age = 1) %>% rename(food_ratio = X, mortality_reduction = Y), 
+    mort_elast[3:4] %>% mutate(age = 25) %>% rename(food_ratio = X_1, mortality_reduction = Y_1),
+    mort_elast[5:6] %>% mutate(age = 5) %>% rename(food_ratio = X_2, mortality_reduction = Y_2),
+    mort_elast[7:8] %>% mutate(age = 65) %>% rename(food_ratio = X_3, mortality_reduction = Y_3)
   ) %>%
   group_by(age) %>%
   nest %>% 
   mutate(model = map(data, ~gam(mortality_reduction ~ s(food_ratio), dat = .))) %>%
-  select(-data)
-rm(mort_table) 
+  select(-data) %>%
+  arrange(age) %>%
+  slice(c(rep(1, 5), rep(2, 20), rep(3, 40), rep(4, 20))) %>%
+  mutate(age = 0:84)
 
 plot(fertility_elasticity)
-walk(survivorship_elasticity$model, plot, pages = 1)
+walk(survivorship_elasticity$model, plot)
 ```
 
 ```{r reproduction}
@@ -225,18 +218,19 @@ birth_death <- function(household){
   household %>%
     mutate(inhabitants = map2(inhabitants, food_ratio, reproduce),
            inhabitants = map2(inhabitants, food_ratio, die),
+           inhabitants = map(inhabitants, ~mutate(.x, age = age + 1)),
            n_inhabitants = map_int(inhabitants, nrow)) %>%
     filter(n_inhabitants > 0)
 }
 
 out <- c()
-
-pop.test <- population %>% unnest
+pop.test <- population %>% unnest %>% mutate(food_ratio = .8)
 for(i in 1:100){
   pop.test <- pop.test  %>% birth_death()
   out <- c(out, pop.test %>% select(n_inhabitants) %>% sum)
 }
 
+plot(out)
 ```
 
 
