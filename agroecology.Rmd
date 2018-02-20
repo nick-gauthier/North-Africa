@@ -102,15 +102,14 @@ plot(gdd5, mean(temp))
 calorie.req <- 202.5 #212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
 seed.req <- 135  #108 # kg of wheat to sow a hectare
 yield <- seed.req * 4   # kg of wheat yield per hectare, based on 4:1 yields
-```
-
-Create a 2 villages of 10 households with 6 people in each.
-```{r}
 init_settlements <- 2 
 init_households <- 2
 init_inhabitants <- 6
 init_age <- 25
+```
 
+Create a 2 villages of 10 households with 6 people in each.
+```{r}
 create.households <- function(x){
   tibble(household = 1:x,
          n_inhabitants = init_inhabitants,
@@ -128,6 +127,42 @@ population <- tibble(settlement = 1:init_settlements,
               mutate(households = map(households, create.households))
 ```
 
+
+```{r}
+land.req <- function(population) calorie.req * population * (1 + 0.15)  / yield
+land.req(1)
+
+```
+```{r yields}
+yield <- function(fertility, precipitation){
+  f.reduction <- max(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
+  p.reduction <- max(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
+  return((f.reduction + p.reduction) / 2)
+} 
+#todo, replace with gams!
+```
+
+```{r soili-dynamics}
+carrying.capacity <- 100
+degredation.factor <- 1 # c(2, 1, 0)
+regeneration.rate <- 0.0844 # c(0.1188, 0.0844, 0.05)
+depletion.rate <- 0.5
+production_elasticity <- 0.2
+
+soil.delta <- function(x, population){
+  regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
+}
+
+soil <- 100
+for(i in 1:100){
+  newsoil <- soil[i] + soil.delta(soil[i], 3)  
+  if(newsoil < 0){newsoil <- 0}
+  soil <- c(soil, newsoil)
+}
+plot(soil)
+
+plot(soil.delta(1:100, 1))
+```
 
 ```{r}
 eat <- function(households, harvest){
@@ -181,7 +216,6 @@ survivorship_elasticity <- bind_rows(
   mutate(age = 0:84)
 
 plot(fertility_elasticity)
-walk(survivorship_elasticity$model, plot)
 ```
 
 ```{r reproduction}
@@ -219,7 +253,8 @@ birth_death <- function(household){
     mutate(inhabitants = map2(inhabitants, food_ratio, reproduce),
            inhabitants = map2(inhabitants, food_ratio, die),
            inhabitants = map(inhabitants, ~mutate(.x, age = age + 1)),
-           n_inhabitants = map_int(inhabitants, nrow)) %>%
+           n_inhabitants = map_int(inhabitants, nrow),
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) %>%
     filter(n_inhabitants > 0)
 }
 
@@ -229,38 +264,10 @@ for(i in 1:100){
   pop.test <- pop.test  %>% birth_death()
   out <- c(out, pop.test %>% select(n_inhabitants) %>% sum)
 }
-
 plot(out)
 ```
 
 
-```{r}
-carrying.capacity <- 100
-degredation.factor <- 1
-regeneration.rate <- 0.0844
-depletion.rate <- 0.5
-production_elasticity <- 0.2
-
-soil.dynamics <- function(x, population){
-  x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
-}
-
-soil <- 100
-for(i in 1:100){
-  newsoil <- soil.dynamics(soil[i], 3)  
-  if(newsoil < 0){newsoil <- 0}
-  soil <- c(soil, newsoil)
-}
-plot(soil)
-```
 
 
 
-```{r}
-land.req <- function(population, rent = .3){
-  produce <- yield - seed.req
-  hectares <- calorie.req * population / (produce * (1 - rent)) 
-  total.rent <- hectares * rent * produce
-  return(data_frame(hectares, total.rent))
-}
-```
