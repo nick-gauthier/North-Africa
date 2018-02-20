@@ -102,6 +102,8 @@ plot(gdd5, mean(temp))
 calorie.req <- 212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
 #sowing_rate <- 135  #108 # kg of wheat to sow a hectare
 kg.to.calories <- 3320 # kcals in one kg of wheat
+labor.per.hectare <- 40 # person days per hectare
+max.ag.labor <- 300 # maximum days per year an individual can devote to farming
 max.yield <- 2000
 init_settlements <- 1 
 init_households <- 3
@@ -112,6 +114,7 @@ degredation.factor <- 0 # c(2, 1, 0)
 regeneration.rate <- 0.05 # c(0.1188, 0.0844, 0.05)
 depletion.rate <- 0.5
 production_elasticity <- 0.2
+max.memory <- 15 # maximum number of years a household remembers
 ```
 
 Create a 2 villages of 10 households with 6 people in each.
@@ -122,7 +125,8 @@ create.households <- function(x){
          storage = n_inhabitants * calorie.req,
          yield_memory = c(max.yield),
          food_ratio = 1) %>%
-    mutate(inhabitants = map(n_inhabitants, create.inhabitants))
+    mutate(inhabitants = map(n_inhabitants, create.inhabitants),
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
 }
 
 create.inhabitants <- function(x){
@@ -136,14 +140,17 @@ population <- tibble(settlement = 1:init_settlements,
 
 
 ```{r}
-land.req <- function(population, yield) calorie.req * population * (1 + 0) / yield
+land.req <- function(population, yield, laborers){
+  land <- calorie.req * population * (1 + 0) / yield
+  pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
+}
 ```
 
 ```{r yields}
 yield <- function(fertility, precipitation){
   f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
   p.reduction <- pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
-  return(max.yield * (f.reduction + p.reduction) / 2)
+  return(max.yield * f.reduction  * p.reduction)
 } 
 #todo, replace with gams!
 ```
@@ -155,14 +162,33 @@ soil.dynamics <- function(x, population){
 }
 ```
 
+
 ```{r}
-eat <- function(households, harvest){
+farm <- function(households){
+  households %>%
+    mutate(land = land.req(n_inhabitants, peak_end(yield_memory), laborers),
+           yield = this.yield,
+           yield_memory = map2(.data$yield_memory, .data$yield, remember),
+           harvest = land * this.yield) #%>%
+    #select(-land, -yield)
+}
+```
+
+
+```{r}
+eat <- function(households){
   households %>%
     mutate(total.cal.req = n_inhabitants * calorie.req,
            food_ratio = (storage + harvest) / total.cal.req,
            old.storage = storage,
-           storage = if_else(total.cal.req <= storage, harvest, max(harvest - (total.cal.req - old.storage), 0))) %>%
-    select(-old.storage, -total.cal.req)
+           storage = if_else(total.cal.req <= storage, harvest, pmax(harvest - (total.cal.req - old.storage), 0))) %>%
+    select(-old.storage, -total.cal.req, -harvest)
+}
+
+remember <- function(yield_memory, yield){
+  yield_memory <- c(yield, yield_memory)
+  if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:15]
+  return(yield_memory)
 }
 ```
 
@@ -171,26 +197,29 @@ precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
 soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
 test <- population$households[[1]]
 out <- c()
-for(i in 1:1000){
+nsim <- 500
+pb <- txtProgressBar(min = 0, max = nsim, style = 3)
+for(i in 1:nsim){
   this.yield <- overlay(soil, precip, fun = yield) %>% getValues()
 test <- test%>% 
-  mutate(land = land.req(n_inhabitants, peak_end(yield_memory))) %>% 
-  mutate(harvest = land * this.yield) %>%
+  farm %>%
   eat %>%
   birth_death
 
 soil <- soil.dynamics(soil, nrow(test))
 out <- c(out, sum(test$n_inhabitants))
+setTxtProgressBar(pb, i)
 }
+close(pb)
 plot(out)
-  
+test
+```
 
 
 
-
-c(3) %>% peak_end
+```{r}
 peak_end <- function(x){
-  mean(c(x[1], min(x)))
+  map_dbl(x, ~mean(c(.x[1], min(.x))))
 }
 ```
 
@@ -268,8 +297,8 @@ die <- function(inhabitants, food_ratio){
 
 
 ```{r}
-birth_death <- function(household){
-  household %>%
+birth_death <- function(households){
+  households %>%
     mutate(inhabitants = map2(inhabitants, food_ratio, reproduce),
            inhabitants = map2(inhabitants, food_ratio, die),
            inhabitants = map(inhabitants, ~mutate(.x, age = age + 1)),
