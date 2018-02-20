@@ -1,23 +1,32 @@
 ---
 title: "Agroecology_dyn"
-output: html_document
+output: 
+  html_document: 
+    highlight: haddock
+    keep_md: yes
 ---
-
+Agent-based model of Roman land use and agroecology in North Africa
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-```{r}
-library(raster)
-library(tidyverse)
-library(mgcv)
+# Setup
+Import necessary packages
+```{r libraries}
+library(raster)  # for raster manipulation
+library(MODIS)
+library(tidyverse) # for data manipulation and plotting
+library(mgcv) # for fitting functions to data
+library(viridis) # for color palettes
 ```
 
-```{r}
+# Environment
+Set a bounding box for the study area.
+```{r bbox}
 bbox <- extent(5, 11.5, 34, 37.5)
 ```
 
-```{r}
+Import SRTM GDEM data for the elevation basemap.
+```{r elevation}
 elev <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
 elev_dat <- as.data.frame(elev, xy =  T, na.rm = T) %>%
   rename(elev = SRTM_1km)
@@ -30,8 +39,9 @@ ggplot(elev_dat, aes(x, y)) +
   labs(title = 'Elevation', subtitle = 'Africa Proconsularis')
 ```
 
-```{r}
-slope <- terrain(srtm, opt = 'slope', unit = 'degrees')
+Calculate slope in degrees from the SRTM elevation.
+```{r slope}
+slope <- terrain(elev, opt = 'slope', unit = 'degrees')
 slope_dat <- as.data.frame(slope, xy = T, na.rm = T)
 
 ggplot(slope_dat, aes(x, y)) +
@@ -42,7 +52,8 @@ ggplot(slope_dat, aes(x, y)) +
   labs(title = 'Slope', subtitle = 'Africa Proconsularis')
 ```
 
-```{r}
+Where is arable land? Calculate the frequency of land with < 5 degree slope within 2.5 km.
+```{r arable_land}
 focalWeight(slope < 5, 0.008333333 * 2, type = 'circle') %>%
   focal(slope < 5, ., sum) %>%
   as.data.frame(xy = T, na.rm = T) %>%
@@ -54,116 +65,94 @@ focalWeight(slope < 5, 0.008333333 * 2, type = 'circle') %>%
   labs(title = 'Arable land', subtitle = 'Africa Proconsularis')
 ```
 
-```{r climate, cache = T}
-import_chelsa <- function(x){
-  list.files(x, full.names = T) %>% 
-  stack %>%
-  crop(bbox) %>%
-  .[[c(1,5:12, 2:4)]]
-}
-prec <- import_chelsa('/media/nick/0327ee2a-8256-411c-8b81-4f099c20a7cf/CHELSA/prec/')
-temp <- import_chelsa('/media/nick/0327ee2a-8256-411c-8b81-4f099c20a7cf/CHELSA/temp/') %>%
-  `/`(10)
-
-levelplot(prec)
-levelplot(temp)
-```
-
-```{r}
-gdd5_interp <- function(x){
-  if(any(is.na(x))){return(NA)} else{
-    daily <- gam(x ~ s(doy, bs = 'cc', k = 12), knots = list(doy = c(1, 366))) %>%
-      predict.gam(data.frame(doy = 1:365)) 
-    daily[daily < 5] <- 5
-    return(sum(daily - 5))
-  }
-}
-
-doy <-c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349)
-```
-
-```{r eval = F}
-beginCluster(4)
-gdd5 <- clusterR(temp, calc, args = list(fun = gdd5_interp), export = 'doy')
-endCluster()
-writeRaster(gdd5, 'data/CHELSA/gdd5_1km.tif', overwrite = T)
-```
-
-```{r}
+Now import temperature and precipitaiton data.
+```{r climate}
+prec <- brick('data/CHELSA/prec_1km.tif') %>% sum
 gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
+rasterVis::levelplot(prec)
 rasterVis::levelplot(gdd5)
+```
 
-plot(gdd5, mean(temp))
+Vegetation
+```{r vegetation}
+pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover_Type_5.tif') %>%
+  projectRaster(disaggregate(elev, 2), method = 'ngb')
+
+
+  test <- pft %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+    rename(pft = MCD12Q1.A2001001.Land_Cover_Type_5) %>%
+  #filter(!pft %in% c(0, 7:10)) %>%
+  mutate(pft = recode_factor(as.factor(pft),
+                               `0` = 'Water',
+                               `1` = 'Evergreen Needleleaf trees',
+                               `2` = 'Evergreen Broadleaf trees',
+                               `3` = 'Deciduous Needleleaf trees',
+                               `4` = 'Deciduous Broadleaf trees',
+                               `5` = 'Shrub',
+                               `6` = 'Grass',
+                               `7` = 'Cereal crops',
+                               `8` = 'Broad-leaf crops',
+                               `9` = 'Urban and built-up',
+                               `10` =	'Snow and ice',
+                               `11` = 'Barren or sparse vegetation'))
+
+lc_colors <- c('#000080', '#008000', '#00FF00', '#99CC00', '#99FF99', '#FFCC99', '#FF9900', '#FFFF00', '#999966', '#FF0000', '#FFFFFF', '#808080') 
+               #'#016400', '#018200', '#97bf47','#dcce00',  '#fffbc3')
+# colors inspired by https://lpdaac.usgs.gov/about/news_archive/modisterra_land_cover_types_yearly_l3_global_005deg_cmg_mod12c1
+ggplot(test, aes(x, y)) + 
+  geom_tile(aes(fill = pft)) + 
+  scale_fill_manual(values = lc_colors) + 
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Vegetation distribution', subtitle = 'Africa Proconsularis, present day')
 ```
 
 # Social Model
-##Parameters
-```{r}
+Now move onto the social model.
+## Parameters
+First we need to define all the neccessary parameters.
+Start with the populaiton level parameters, i.e. how many settlements, households, and individuals to start the simulation with.
+
+```{r pop_params}
+init_settlements <- 1 
+init_households <- 3
+init_inhabitants <- 6
+init_age <- 25
+```
+
+Then define some parameters relating to food production and consumption.
+```{r food_params}
 calorie.req <- 212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
 #sowing_rate <- 135  #108 # kg of wheat to sow a hectare
 kg.to.calories <- 3320 # kcals in one kg of wheat
 labor.per.hectare <- 40 # person days per hectare
 max.ag.labor <- 300 # maximum days per year an individual can devote to farming
 max.yield <- 2000
-init_settlements <- 1 
-init_households <- 3
-init_inhabitants <- 6
-init_age <- 25
+max.memory <- 15 # maximum number of years a household remembers
+production_elasticity <- 0.2
+```
+
+Finally define parameters controlling the soil fertility dynamics.
+```{r soil_parameters}
 carrying.capacity <- 100
 degredation.factor <- 0 # c(2, 1, 0)
 regeneration.rate <- 0.05 # c(0.1188, 0.0844, 0.05)
 depletion.rate <- 0.5
-production_elasticity <- 0.2
-max.memory <- 15 # maximum number of years a household remembers
 ```
 
-Create a 2 villages of 10 households with 6 people in each.
-```{r}
-create.households <- function(x){
-  tibble(household = 1:x,
-         n_inhabitants = init_inhabitants,
-         storage = n_inhabitants * calorie.req,
-         yield_memory = c(max.yield),
-         food_ratio = 1) %>%
-    mutate(inhabitants = map(n_inhabitants, create.inhabitants),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
-}
+Now we move onto defining key functions dealing with farming, soil dynamics, and demography.
 
-create.inhabitants <- function(x){
-  tibble(age = rep(25, x))
-}
+## Modules
+### Farming
 
-population <- tibble(settlement = 1:init_settlements,
-                     households = init_households) %>%
-              mutate(households = map(households, create.households))
+How agents decide the amount of land they need to farm.
+```{r land_req}
+
 ```
 
-
-```{r}
-land.req <- function(population, yield, laborers){
-  land <- calorie.req * population * (1 + 0) / yield
-  pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
-}
-```
-
-```{r yields}
-yield <- function(fertility, precipitation){
-  f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
-  p.reduction <- pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
-  return(max.yield * f.reduction  * p.reduction)
-} 
-#todo, replace with gams!
-```
-
-```{r soili-dynamics}
-soil.dynamics <- function(x, population){
-  newsoil <- x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
-  return(max(newsoil, 0))
-}
-```
-
-
-```{r}
+Agents determine how much land they need, calculate the yields from their  land, remember these yields, and harvest from the land
+```{r farm_funs}
 farm <- function(households){
   households %>%
     mutate(land = land.req(n_inhabitants, peak_end(yield_memory), laborers),
@@ -171,18 +160,6 @@ farm <- function(households){
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
            harvest = land * this.yield) #%>%
     #select(-land, -yield)
-}
-```
-
-
-```{r}
-eat <- function(households){
-  households %>%
-    mutate(total.cal.req = n_inhabitants * calorie.req,
-           food_ratio = (storage + harvest) / total.cal.req,
-           old.storage = storage,
-           storage = if_else(total.cal.req <= storage, harvest, pmax(harvest - (total.cal.req - old.storage), 0))) %>%
-    select(-old.storage, -total.cal.req, -harvest)
 }
 
 remember <- function(yield_memory, yield){
@@ -192,38 +169,58 @@ remember <- function(yield_memory, yield){
 }
 ```
 
+The determination of how much land is needed is a function of the household's occupants and labor availability.
 ```{r}
-precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
-soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
-test <- population$households[[1]]
-out <- c()
-nsim <- 500
-pb <- txtProgressBar(min = 0, max = nsim, style = 3)
-for(i in 1:nsim){
-  this.yield <- overlay(soil, precip, fun = yield) %>% getValues()
-test <- test%>% 
-  farm %>%
-  eat %>%
-  birth_death
-
-soil <- soil.dynamics(soil, nrow(test))
-out <- c(out, sum(test$n_inhabitants))
-setTxtProgressBar(pb, i)
+land.req <- function(population, yield, laborers){
+  land <- calorie.req * population * (1 + 0) / yield
+  pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
 }
-close(pb)
-plot(out)
-test
 ```
 
-
-
+Agents use the peak-end rule when accessing memory.
 ```{r}
 peak_end <- function(x){
   map_dbl(x, ~mean(c(.x[1], min(.x))))
 }
 ```
 
+Finally eat the harvested food, updating storage and food_ratio accordingly
+```{r}
+eat <- function(households){
+  households %>%
+    mutate(total.cal.req = n_inhabitants * calorie.req,
+           food_ratio = (storage + harvest) / total.cal.req,
+           old.storage = storage,
+           storage = if_else(total.cal.req <= storage, harvest, pmax(harvest - (total.cal.req - old.storage), 0))) %>%
+    select(-old.storage, -total.cal.req, -harvest)
+}
+```
 
+
+### Soil Dynamics
+
+Crop yields determined by rainfall and soil fertility.
+```{r yields}
+yield <- function(fertility, precipitation){
+  f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
+  p.reduction <- pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
+  return(max.yield * f.reduction  * p.reduction)
+} 
+#todo, replace with gams!
+```
+
+Soil fertility dynamics
+```{r soili-dynamics}
+soil.dynamics <- function(x, population){
+  newsoil <- x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
+  return(max(newsoil, 0))
+}
+```
+
+
+### Demography
+
+Generate fertility and mortality tables from pre-prepared data.
 ```{r birth-death}
 fertility_table <- tibble(
   age = 10:49,
@@ -241,8 +238,8 @@ ggplot(mortality_table, aes(age, rate)) +
   labs(title = 'Fertility and Mortality Rates', subtitle = 'Per capita fertility (blue) and mortality (red) in the Roman Empire', x = 'Age', y = 'Vital rate') +
   theme_bw()
 ```
-https://stackoverflow.com/questions/38237350/repeating-rows-of-data-frame-in-dplyr#comment63896747_38237805
 
+Calculate functions for vital rate elasticities from pre-prepared data.
 ```{r vital-rate-elasticity}
 fertility_elasticity <- read_csv('data/fertility_data.csv', skip = 1) %>% 
   rename(food_ratio = X, fertility_reduction = Y) %>%
@@ -267,6 +264,7 @@ survivorship_elasticity <- bind_rows(
 plot(fertility_elasticity)
 ```
 
+Birth
 ```{r reproduction}
 reproduce <- function(inhabitants, food_ratio){
   fertility_reduction <- ifelse(food_ratio >= 1, 1, predict(fertility_elasticity, list(food_ratio = food_ratio)))
@@ -283,6 +281,7 @@ reproduce <- function(inhabitants, food_ratio){
 }
 ```
 
+Death
 ```{r}
 die <- function(inhabitants, food_ratio){
   inhabitants %>%
@@ -295,7 +294,7 @@ die <- function(inhabitants, food_ratio){
 }
 ```
 
-
+Agents first reproduce, then die, then age, and finally remove households with no inhabiants.
 ```{r}
 birth_death <- function(households){
   households %>%
@@ -306,17 +305,53 @@ birth_death <- function(households){
            laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) %>%
     filter(n_inhabitants > 0)
 }
-
-out <- c()
-pop.test <- population %>% unnest %>% mutate(food_ratio = .8)
-for(i in 1:100){
-  pop.test <- pop.test  %>% birth_death()
-  out <- c(out, pop.test %>% select(n_inhabitants) %>% sum)
-}
-plot(out)
 ```
 
 
+# Simulation runs
+Create a 2 villages of 10 households with 6 people in each.
+```{r}
+create.households <- function(x){
+  tibble(household = 1:x,
+         n_inhabitants = init_inhabitants,
+         storage = n_inhabitants * calorie.req,
+         yield_memory = c(max.yield),
+         food_ratio = 1) %>%
+    mutate(inhabitants = map(n_inhabitants, create.inhabitants),
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
+}
 
+create.inhabitants <- function(x){
+  tibble(age = rep(25, x))
+}
+
+population <- tibble(settlement = 1:init_settlements,
+                     households = init_households) %>%
+              mutate(households = map(households, create.households))
+```
+
+Test environment, generate simple raster to represent our environment
+```{r}
+precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
+soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
+test <- population$households[[1]]
+out <- c()
+nsim <- 500
+pb <- txtProgressBar(min = 0, max = nsim, style = 3)
+for(i in 1:nsim){
+  this.yield <- overlay(soil, precip, fun = yield) %>% getValues()
+test <- test%>% 
+  farm %>%
+  eat %>%
+  birth_death
+
+soil <- soil.dynamics(soil, nrow(test))
+out <- c(out, sum(test$n_inhabitants))
+setTxtProgressBar(pb, i)
+}
+close(pb)
+plot(out)
+test
+```
 
 
