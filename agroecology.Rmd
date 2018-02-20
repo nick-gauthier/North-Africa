@@ -99,13 +99,19 @@ plot(gdd5, mean(temp))
 # Social Model
 ##Parameters
 ```{r}
-calorie.req <- 202.5 #212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
-seed.req <- 135  #108 # kg of wheat to sow a hectare
-yield <- seed.req * 4   # kg of wheat yield per hectare, based on 4:1 yields
-init_settlements <- 2 
-init_households <- 2
+calorie.req <- 212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
+#sowing_rate <- 135  #108 # kg of wheat to sow a hectare
+kg.to.calories <- 3320 # kcals in one kg of wheat
+max.yield <- 2000
+init_settlements <- 1 
+init_households <- 3
 init_inhabitants <- 6
 init_age <- 25
+carrying.capacity <- 100
+degredation.factor <- 0 # c(2, 1, 0)
+regeneration.rate <- 0.05 # c(0.1188, 0.0844, 0.05)
+depletion.rate <- 0.5
+production_elasticity <- 0.2
 ```
 
 Create a 2 villages of 10 households with 6 people in each.
@@ -114,6 +120,7 @@ create.households <- function(x){
   tibble(household = 1:x,
          n_inhabitants = init_inhabitants,
          storage = n_inhabitants * calorie.req,
+         yield_memory = c(max.yield),
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants))
 }
@@ -129,51 +136,64 @@ population <- tibble(settlement = 1:init_settlements,
 
 
 ```{r}
-land.req <- function(population) calorie.req * population * (1 + 0.15)  / yield
-land.req(1)
-
+land.req <- function(population, yield) calorie.req * population * (1 + 0) / yield
 ```
+
 ```{r yields}
 yield <- function(fertility, precipitation){
-  f.reduction <- max(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
-  p.reduction <- max(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
-  return((f.reduction + p.reduction) / 2)
+  f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
+  p.reduction <- pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
+  return(max.yield * (f.reduction + p.reduction) / 2)
 } 
 #todo, replace with gams!
 ```
 
 ```{r soili-dynamics}
-carrying.capacity <- 100
-degredation.factor <- 1 # c(2, 1, 0)
-regeneration.rate <- 0.0844 # c(0.1188, 0.0844, 0.05)
-depletion.rate <- 0.5
-production_elasticity <- 0.2
-
-soil.delta <- function(x, population){
-  regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
+soil.dynamics <- function(x, population){
+  newsoil <- x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
+  return(max(newsoil, 0))
 }
-
-soil <- 100
-for(i in 1:100){
-  newsoil <- soil[i] + soil.delta(soil[i], 3)  
-  if(newsoil < 0){newsoil <- 0}
-  soil <- c(soil, newsoil)
-}
-plot(soil)
-
-plot(soil.delta(1:100, 1))
 ```
 
 ```{r}
 eat <- function(households, harvest){
-  food.req <- calorie.req * nrow(inhabitants)
   households %>%
-    mutate(food.ratio = (storage + harvest)/ food.req) %>%
-    mutate(old.storage = storage,
-           storage = if_else(food.req <= storage, harvest, max(harvest - (food.req - old.storage), 0))) %>%
-    select(-old.storage)
+    mutate(total.cal.req = n_inhabitants * calorie.req,
+           food_ratio = (storage + harvest) / total.cal.req,
+           old.storage = storage,
+           storage = if_else(total.cal.req <= storage, harvest, max(harvest - (total.cal.req - old.storage), 0))) %>%
+    select(-old.storage, -total.cal.req)
 }
 ```
+
+```{r}
+precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
+soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
+test <- population$households[[1]]
+out <- c()
+for(i in 1:1000){
+  this.yield <- overlay(soil, precip, fun = yield) %>% getValues()
+test <- test%>% 
+  mutate(land = land.req(n_inhabitants, peak_end(yield_memory))) %>% 
+  mutate(harvest = land * this.yield) %>%
+  eat %>%
+  birth_death
+
+soil <- soil.dynamics(soil, nrow(test))
+out <- c(out, sum(test$n_inhabitants))
+}
+plot(out)
+  
+
+
+
+
+c(3) %>% peak_end
+peak_end <- function(x){
+  mean(c(x[1], min(x)))
+}
+```
+
 
 ```{r birth-death}
 fertility_table <- tibble(
