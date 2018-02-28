@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 Import necessary packages
 ```{r libraries}
 library(raster)  # for raster manipulation
-library(MODIS)
+library(MODIS) # land cover data
 library(tidyverse) # for data manipulation and plotting
 library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
@@ -72,6 +72,22 @@ gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
 rasterVis::levelplot(prec)
 rasterVis::levelplot(gdd5)
 ```
+Soils
+```{r}
+soils <- merge(raster('data/soils/TAXNWRB_1km_Tunisia.tiff') %>% crop(bbox),
+               raster('data/soils/TAXNWRB_1km_Algeria.tiff') %>% crop(bbox), tolerance = .3)
+soils_dat <- as.data.frame(soils, xy =  T, na.rm = T) %>%
+  rename(type = layer) %>%
+  mutate(type = as.factor(type))
+
+ggplot(soils_dat, aes(x, y)) +
+  geom_raster(aes(fill = type)) +
+  scale_fill_brewer(type = 'qual', name = 'Soil type') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Soils', subtitle = 'Africa Proconsularis')
+```
+
 
 Vegetation
 ```{r vegetation}
