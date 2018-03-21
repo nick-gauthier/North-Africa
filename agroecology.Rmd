@@ -1,5 +1,5 @@
 ---
-title: "Agroecology_dyn"
+title: "Agroecological Dynamics"
 output: 
   html_document: 
     highlight: haddock
@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 # Setup
 Import necessary packages
-```{r libraries}
+```{r libraries, message = F, warning = F}
 library(raster)  # for raster manipulation
 library(MODIS) # land cover data
 library(tidyverse) # for data manipulation and plotting
@@ -69,8 +69,23 @@ Now import temperature and precipitaiton data.
 ```{r climate}
 prec <- brick('data/CHELSA/prec_1km.tif') %>% sum
 gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
-rasterVis::levelplot(prec)
-rasterVis::levelplot(gdd5)
+
+prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
+gdd5_dat <- as.data.frame(gdd5, xy = T, na.rm = T)
+
+ggplot(prec_dat, aes(x, y)) +
+  geom_raster(aes(fill = layer)) +
+  scale_fill_distiller(name = 'Millimeters', direction = 1) +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Annual Precipitation', subtitle = 'Africa Proconsularis')
+
+ggplot(gdd5_dat, aes(x, y)) +
+  geom_raster(aes(fill = gdd5_1km)) +
+  scale_fill_viridis(name = 'Degree Days', option = 'B', direction = 1) +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Growing Degree Days', subtitle = 'Africa Proconsularis')
 ```
 Soils
 ```{r}
