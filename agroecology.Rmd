@@ -141,6 +141,7 @@ ggplot(test, aes(x, y)) +
 
 # Social Model
 Now move onto the social model.
+
 ## Parameters
 First we need to define all the neccessary parameters.
 Start with the populaiton level parameters, i.e. how many settlements, households, and individuals to start the simulation with.
@@ -154,12 +155,18 @@ init_age <- 25
 
 Then define some parameters relating to food production and consumption.
 ```{r food_params}
-calorie.req <- 212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
-#sowing_rate <- 135  #108 # kg of wheat to sow a hectare
-kg.to.calories <- 3320 # kcals in one kg of wheat
+max.yield <- 2000 # maximum possible wheat yield, in kg/ha
+
+calorie.req <- 2582 * 365  # annual individual calorie requirement, derived from daily requirement
+wheat.calories <- 3320 # calories in a kg of wheat
+wheat.cal.proportion <- 0.75 # percent of individual's food calories coming from wheat
+food.req <- calorie.req / wheat.calories * wheat.cal.proportion # kg of wheat to feed a person for 1 year
+
+sowing_rate <- 135  # kg of wheat to sow a hectare (range 108 - 135 from Roman agronomists)
+seed_proportion <- 135 / max.yield # proportion of harvest to save as seed for next year's sowing
+
 labor.per.hectare <- 40 # person days per hectare
 max.ag.labor <- 300 # maximum days per year an individual can devote to farming
-max.yield <- 2000
 max.memory <- 15 # maximum number of years a household remembers
 production_elasticity <- 0.2
 ```
@@ -177,12 +184,23 @@ Now we move onto defining key functions dealing with farming, soil dynamics, and
 ## Modules
 ### Farming
 
-How agents decide the amount of land they need to farm.
+How agents decide the amount of land they need to farm. The determination of how much land is needed is a function of the household's occupants and labor availability.
 ```{r land_req}
+land.req <- function(population, yield, laborers){
+  land <- annual.wheat.req * population * (1 + seed_proportion) / yield
+  pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
+}
 
+bind_rows(tibble(inhabitants = 1:20, land = land.req(inhabitants, max.yield, 3), Management = 'No Fallow'),
+          tibble(inhabitants = 1:20, land = 2 * land.req(inhabitants, max.yield, 3), Management = 'Fallow')) %>%
+ggplot(aes(inhabitants, land, color = Management)) +
+  geom_line() + 
+  labs(title = 'Household size and land requirements', subtitle = 'Assuming yield of 2,000 kg/ha', 
+       x = 'Household Size (inhabitants)', y = 'Farm land requirement (ha)') +
+  theme_minimal()
 ```
 
-Agents determine how much land they need, calculate the yields from their  land, remember these yields, and harvest from the land
+Agents determine how much land they need, calculate the yields from their land, remember these yields, and harvest from the land
 ```{r farm_funs}
 farm <- function(households){
   households %>%
