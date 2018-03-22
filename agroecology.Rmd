@@ -31,7 +31,7 @@ carrying.capacity <- 100
 degradation <- tibble(type = c('reversible', 'hysteresis', 'irreversible'), 
                       degradation_factor = c(0, 1, 2),
                       regeneration_rate = c(0.05, 0.0844, 0.11880))
-depletion.rate <- 0.25 # .25  to represent biennial fallow, .5 otherwise
+depletion.rate <- 0.5 # .25  to represent biennial fallow, .5 otherwise
 ```
 
 Soil fertility dynamics
@@ -108,8 +108,10 @@ grid.arrange(p1, p2, ncol = 2)
 ```
 
 How agents decide the amount of land they need to farm. The determination of how much land is needed is a function of the household's occupants and labor availability.
+
+We have capabilities for fallowing, but for simplicity let's turn that off by default
 ```{r land_req}
-land.req <- function(population, yield, laborers, fallow = T){
+land.req <- function(population, yield, laborers, fallow = F){
   land <- wheat.req * population * (1 + seed_proportion) / yield * ifelse(fallow, 2, 1)
   pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
 }
@@ -117,7 +119,7 @@ land.req <- function(population, yield, laborers, fallow = T){
 
 ```{r echo=F}
 bind_rows(tibble(n = 1:20, land = land.req(n, max.yield, 3, fallow = F), Management = 'No Fallow'),
-          tibble(n = 1:20, land = land.req(n, max.yield, 3), Management = 'Fallow')) %>%
+          tibble(n = 1:20, land = land.req(n, max.yield, 3, fallow = T), Management = 'Fallow')) %>%
 ggplot(aes(n, land, color = Management)) +
   geom_line() + 
   labs(title = 'Household size and land requirements', subtitle = 'Assuming yield of 2,000 kg/ha', 
@@ -125,13 +127,25 @@ ggplot(aes(n, land, color = Management)) +
   theme_minimal()
 ```
 
+Here households calculate how much land they need, pull the crop yield from the environment, remember the yield, and determine their harvests by multiplying the yield by the amount of land they have (also removing some of the crop to save as seed for next year).
+
+first, for dev purposes, make a fake environment raster.
+```{r}
+allocate_land <- function(households){
+  households %>% 
+   mutate(land_req = land.req(n_inhabitants, peak_end(yield_memory), laborers),
+          total_land_req = sum(land_req),
+          land = if_else(total_land_req < (arable_proportion * 100), land_req, land_req / total_land_req * arable_proportion * 100)) %>%
+    select(-land_req, -total_land_req)
+}
+```
+
 ```{r farm_funs}
 farm <- function(households){
   households %>%
-    mutate(land = land.req(n_inhabitants, peak_end(yield_memory), laborers),
-           yield = this.yield,
+    mutate(yield = this.yield,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * this.yield * (1 - seed_proportion)) #%>%
+           harvest = land * this.yield - land * sowing_rate) #%>%
     #select(-land, -yield)
 }
 
@@ -218,10 +232,6 @@ survivorship_elasticity <- bind_rows(
   mutate(age = 0:84)
 ```
 
-```{r echo = F}
-plot(fertility_elasticity)
-```
-
 Birth
 ```{r reproduction}
 reproduce <- function(inhabitants, food_ratio){
@@ -285,11 +295,12 @@ create.households <- function(x){
          yield_memory = c(max.yield),
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow),
+           land = land.req(n_inhabitants, peak_end(yield_memory), laborers))
 }
 
 create.inhabitants <- function(x){
-  tibble(age = rep(25, x))
+  tibble(age = rep(init_age, x))
 }
 
 population <- tibble(settlement = 1:init_settlements,
@@ -299,7 +310,7 @@ population <- tibble(settlement = 1:init_settlements,
 
 Test environment, generate simple raster to represent our environment
 ```{r eval = F}
-
+arable_proportion <- 0.9
 sim.out <- tibble(year = 0, population = 0, fertility =  0, replicate = 0)
 nsim <- 300
 precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
@@ -309,7 +320,7 @@ for(j in 1:10){
 soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
 test <- population$households[[1]]
 for(i in 1:nsim){
-  this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * .5 # *.5 for fallow
+  this.yield <- overlay(soil, precip, fun = yield) %>% getValues() # *.5 for fallow
 test <- test%>% 
   farm %>%
   eat %>%
