@@ -16,189 +16,15 @@ library(MODIS) # land cover data
 library(tidyverse) # for data manipulation and plotting
 library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
+library(gridExtra)
 ```
 
-# Environment
-Set a bounding box for the study area.
+# Modules
+First we define key functions dealing with farming, soil dynamics, and demography.
 
-```r
-bbox <- extent(5, 11.5, 34, 37.5)
-```
+### Soil Dynamics
 
-Import SRTM GDEM data for the elevation basemap.
-
-```r
-elev <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
-elev_dat <- as.data.frame(elev, xy =  T, na.rm = T) %>%
-  rename(elev = SRTM_1km)
-
-ggplot(elev_dat, aes(x, y)) +
-  geom_raster(aes(fill = elev)) +
-  scale_fill_gradientn(colours = terrain.colors(10), name = 'Meters') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Elevation', subtitle = 'Africa Proconsularis')
-```
-
-![](agroecology_files/figure-html/elevation-1.png)<!-- -->
-
-Calculate slope in degrees from the SRTM elevation.
-
-```r
-slope <- terrain(elev, opt = 'slope', unit = 'degrees')
-slope_dat <- as.data.frame(slope, xy = T, na.rm = T)
-
-ggplot(slope_dat, aes(x, y)) +
-  geom_raster(aes(fill = slope)) +
-  scale_fill_viridis(name = 'Degrees', option = 'B') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Slope', subtitle = 'Africa Proconsularis')
-```
-
-![](agroecology_files/figure-html/slope-1.png)<!-- -->
-
-Where is arable land? Calculate the frequency of land with < 5 degree slope within 2.5 km.
-
-```r
-focalWeight(slope < 5, 0.008333333 * 2, type = 'circle') %>%
-  focal(slope < 5, ., sum) %>%
-  as.data.frame(xy = T, na.rm = T) %>%
-  ggplot(aes(x, y)) +
-  geom_raster(aes(fill = layer)) +
-  scale_fill_viridis(name = 'Proportion \narable land') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Arable land', subtitle = 'Africa Proconsularis')
-```
-
-![](agroecology_files/figure-html/arable_land-1.png)<!-- -->
-
-Now import temperature and precipitaiton data.
-
-```r
-prec <- brick('data/CHELSA/prec_1km.tif') %>% sum
-gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
-
-prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
-gdd5_dat <- as.data.frame(gdd5, xy = T, na.rm = T)
-
-ggplot(prec_dat, aes(x, y)) +
-  geom_raster(aes(fill = layer)) +
-  scale_fill_distiller(name = 'Millimeters', direction = 1) +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Annual Precipitation', subtitle = 'Africa Proconsularis')
-```
-
-![](agroecology_files/figure-html/climate-1.png)<!-- -->
-
-```r
-ggplot(gdd5_dat, aes(x, y)) +
-  geom_raster(aes(fill = gdd5_1km)) +
-  scale_fill_viridis(name = 'Degree Days', option = 'B', direction = 1) +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Growing Degree Days', subtitle = 'Africa Proconsularis')
-```
-
-![](agroecology_files/figure-html/climate-2.png)<!-- -->
-Soils
-
-```r
-soils <- merge(raster('data/soils/TAXNWRB_1km_Tunisia.tiff') %>% crop(bbox),
-               raster('data/soils/TAXNWRB_1km_Algeria.tiff') %>% crop(bbox), tolerance = .3)
-soils_dat <- as.data.frame(soils, xy =  T, na.rm = T) %>%
-  rename(type = layer) %>%
-  mutate(type = as.factor(type))
-
-ggplot(soils_dat, aes(x, y)) +
-  geom_raster(aes(fill = type)) +
-  scale_fill_brewer(type = 'qual', name = 'Soil type') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Soils', subtitle = 'Africa Proconsularis')
-```
-
-```
-## Warning in RColorBrewer::brewer.pal(n, pal): n too large, allowed maximum for palette Accent is 8
-## Returning the palette you asked for with that many colors
-```
-
-```
-## Warning: Removed 149350 rows containing missing values (geom_raster).
-```
-
-![](agroecology_files/figure-html/unnamed-chunk-1-1.png)<!-- -->
-
-
-Vegetation
-
-```r
-pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover_Type_5.tif') %>%
-  projectRaster(disaggregate(elev, 2), method = 'ngb')
-
-
-  test <- pft %>%
-  as.data.frame(xy = T, na.rm = T) %>%
-    rename(pft = MCD12Q1.A2001001.Land_Cover_Type_5) %>%
-  #filter(!pft %in% c(0, 7:10)) %>%
-  mutate(pft = recode_factor(as.factor(pft),
-                               `0` = 'Water',
-                               `1` = 'Evergreen Needleleaf trees',
-                               `2` = 'Evergreen Broadleaf trees',
-                               `3` = 'Deciduous Needleleaf trees',
-                               `4` = 'Deciduous Broadleaf trees',
-                               `5` = 'Shrub',
-                               `6` = 'Grass',
-                               `7` = 'Cereal crops',
-                               `8` = 'Broad-leaf crops',
-                               `9` = 'Urban and built-up',
-                               `10` =	'Snow and ice',
-                               `11` = 'Barren or sparse vegetation'))
-
-lc_colors <- c('#000080', '#008000', '#00FF00', '#99CC00', '#99FF99', '#FFCC99', '#FF9900', '#FFFF00', '#999966', '#FF0000', '#FFFFFF', '#808080') 
-               #'#016400', '#018200', '#97bf47','#dcce00',  '#fffbc3')
-# colors inspired by https://lpdaac.usgs.gov/about/news_archive/modisterra_land_cover_types_yearly_l3_global_005deg_cmg_mod12c1
-ggplot(test, aes(x, y)) + 
-  geom_tile(aes(fill = pft)) + 
-  scale_fill_manual(values = lc_colors) + 
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Vegetation distribution', subtitle = 'Africa Proconsularis, present day')
-```
-
-![](agroecology_files/figure-html/vegetation-1.png)<!-- -->
-
-# Social Model
-Now move onto the social model.
-
-## Parameters
-First we need to define all the neccessary parameters.
-Start with the populaiton level parameters, i.e. how many settlements, households, and individuals to start the simulation with.
-
-
-```r
-init_settlements <- 1 
-init_households <- 3
-init_inhabitants <- 6
-init_age <- 25
-```
-
-Then define some parameters relating to food production and consumption.
-
-```r
-calorie.req <- 212  # kg of wheat to feed a person for 1 year, assuming grain is 75% of diet
-#sowing_rate <- 135  #108 # kg of wheat to sow a hectare
-kg.to.calories <- 3320 # kcals in one kg of wheat
-labor.per.hectare <- 40 # person days per hectare
-max.ag.labor <- 300 # maximum days per year an individual can devote to farming
-max.yield <- 2000
-max.memory <- 15 # maximum number of years a household remembers
-production_elasticity <- 0.2
-```
-
-Finally define parameters controlling the soil fertility dynamics.
+Define parameters controlling the soil fertility dynamics.
 
 ```r
 carrying.capacity <- 100
@@ -207,21 +33,62 @@ regeneration.rate <- 0.05 # c(0.1188, 0.0844, 0.05)
 depletion.rate <- 0.5
 ```
 
-Now we move onto defining key functions dealing with farming, soil dynamics, and demography.
+Soil fertility dynamics
 
-## Modules
+```r
+soil.dynamics <- function(x, population){
+  newsoil <- x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
+  return(max(newsoil, 0))
+}
+```
+
 ### Farming
+Agents determine how much land they need, calculate the yields from their land, remember these yields, and harvest from the land.
+
+First define some parameters relating to food production and consumption.
+
+```r
+max.yield <- 2000 # maximum possible wheat yield, in kg/ha
+
+calorie.req <- 2582 * 365  # annual individual calorie requirement, derived from daily requirement
+wheat.calories <- 3320 # calories in a kg of wheat
+wheat.cal.proportion <- 0.75 # percent of individual's food calories coming from wheat
+wheat.req <- calorie.req / wheat.calories * wheat.cal.proportion # kg of wheat to feed a person for 1 year
+
+sowing_rate <- 135  # kg of wheat to sow a hectare (range 108 - 135 from Roman agronomists)
+seed_proportion <- 135 / max.yield # proportion of harvest to save as seed for next year's sowing
+
+labor.per.hectare <- 40 # person days per hectare
+max.ag.labor <- 300 # maximum days per year an individual can devote to farming
+max.memory <- 15 # maximum number of years a household remembers
+production_elasticity <- 0.2
+```
+
+Crop yields are determined by rainfall and soil fertility.
+
+```r
+yield <- function(fertility, precipitation){
+  f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
+  p.reduction <- pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
+  return(max.yield * f.reduction  * p.reduction)
+} 
+#todo, replace with gams!
+```
+
+
+![](agroecology_files/figure-html/unnamed-chunk-1-1.png)<!-- -->
 
 How agents decide the amount of land they need to farm. The determination of how much land is needed is a function of the household's occupants and labor availability.
 
 ```r
 land.req <- function(population, yield, laborers){
-  land <- calorie.req * population * (1 + 0) / yield
+  land <- wheat.req * population * (1 + seed_proportion) / yield
   pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
 }
 ```
 
-Agents determine how much land they need, calculate the yields from their land, remember these yields, and harvest from the land
+![](agroecology_files/figure-html/unnamed-chunk-2-1.png)<!-- -->
+
 
 ```r
 farm <- function(households){
@@ -255,34 +122,11 @@ Finally eat the harvested food, updating storage and food_ratio accordingly
 ```r
 eat <- function(households){
   households %>%
-    mutate(total.cal.req = n_inhabitants * calorie.req,
+    mutate(total.cal.req = n_inhabitants * wheat.req,
            food_ratio = (storage + harvest) / total.cal.req,
            old.storage = storage,
            storage = if_else(total.cal.req <= storage, harvest, pmax(harvest - (total.cal.req - old.storage), 0))) %>%
     select(-old.storage, -total.cal.req, -harvest)
-}
-```
-
-
-### Soil Dynamics
-
-Crop yields determined by rainfall and soil fertility.
-
-```r
-yield <- function(fertility, precipitation){
-  f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
-  p.reduction <- pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
-  return(max.yield * f.reduction  * p.reduction)
-} 
-#todo, replace with gams!
-```
-
-Soil fertility dynamics
-
-```r
-soil.dynamics <- function(x, population){
-  newsoil <- x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
-  return(max(newsoil, 0))
 }
 ```
 
@@ -296,7 +140,6 @@ fertility_table <- tibble(
   age = 10:49,
   rate = rep(c(0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134), each = 5)
 )
-
 mortality_table <- tibble(
   age = c(0:84),
   rate = c(0.4669, rep(0.0702, 4), rep(c(0.0132, 0.0099, 0.0154, 0.0172, 0.0195, 0.0223, 0.0259, 0.0306, 0.0373, 0.0473, 0.0573, 0.0784, 0.1042, 0.1434, 0.2039, 0.2654), each = 5))
@@ -378,8 +221,8 @@ reproduce <- function(inhabitants, food_ratio){
   fertility_reduction <- ifelse(food_ratio >= 1, 1, predict(fertility_elasticity, list(food_ratio = food_ratio)))
   
   babies <- inhabitants %>%
-    filter(age >= 12 & age < 50) %>%   # only individuals of child bearing age reproduce
-    inner_join(fertility_table, by = 'age') %>%    # find the fertility rate corresponding to the individual's age
+    filter(age >= 12 & age < 50) %>% # only individuals of child bearing age reproduce
+    inner_join(fertility_table, by = 'age') %>%  # find the fertility rate corresponding to the individual's age
     mutate(baby = (rate / 2 * fertility_reduction) > runif(n())) %>%  # divide by two to make everyone female ...
     .$baby %>% # select just the babies column
     sum  # add it up to determine the number of newborns in the house
@@ -418,14 +261,24 @@ birth_death <- function(households){
 ```
 
 
-# Simulation runs
+# Simulation
+Start with the populaiton level parameters, i.e. how many settlements, households, and individuals to start the simulation with.
+
+
+```r
+init_settlements <- 1 
+init_households <- 3
+init_inhabitants <- 6
+init_age <- 25
+```
+
 Create a 2 villages of 10 households with 6 people in each.
 
 ```r
 create.households <- function(x){
   tibble(household = 1:x,
          n_inhabitants = init_inhabitants,
-         storage = n_inhabitants * calorie.req,
+         storage = n_inhabitants * wheat.req,
          yield_memory = c(max.yield),
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
@@ -480,4 +333,121 @@ ggplot(sim.out, aes(year, fertility, group = replicate)) +
 test
 ```
 
+# Environment
+
+## Input data
+
+Set a bounding box for the study area.
+
+```r
+bbox <- extent(5, 11.5, 34, 37.5)
+```
+
+Import SRTM GDEM data for the elevation basemap.
+
+```r
+elevation <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
+elev_dat <- as.data.frame(elevation, xy =  T, na.rm = T) %>%
+  rename(elevation = SRTM_1km)
+```
+
+
+
+Calculate slope in degrees from the SRTM elevation.
+
+```r
+slope <- terrain(elevation, opt = 'slope', unit = 'degrees')
+slope_dat <- as.data.frame(slope, xy = T, na.rm = T)
+```
+
+
+
+
+```r
+grid.arrange(p1, p2, ncol = 2)
+```
+
+![](agroecology_files/figure-html/unnamed-chunk-11-1.png)<!-- -->
+
+
+Where is arable land? Calculate the frequency of land with < 5 degree slope within 2.5 km.
+
+```r
+focalWeight(slope < 5, 0.008333333 * 2, type = 'circle') %>%
+  focal(slope < 5, ., sum) %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x, y)) +
+  geom_raster(aes(fill = layer)) +
+  scale_fill_viridis(name = 'Proportion \narable land') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Arable land')
+```
+
+![](agroecology_files/figure-html/arable_land-1.png)<!-- -->
+
+Now import temperature and precipitation data.
+
+```r
+prec <- brick('data/CHELSA/prec_1km.tif') %>% sum
+gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
+
+prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
+gdd5_dat <- as.data.frame(gdd5, xy = T, na.rm = T)
+```
+
+![](agroecology_files/figure-html/unnamed-chunk-12-1.png)<!-- -->
+Soils
+
+```r
+soils <- merge(raster('data/soils/TAXNWRB_1km_Tunisia.tiff') %>% crop(bbox),
+               raster('data/soils/TAXNWRB_1km_Algeria.tiff') %>% crop(bbox), tolerance = .3)
+soils_dat <- as.data.frame(soils, xy =  T, na.rm = T) %>%
+  rename(type = layer) %>%
+  mutate(type = as.factor(type))
+```
+
+
+```
+## Warning in RColorBrewer::brewer.pal(n, pal): n too large, allowed maximum for palette Accent is 8
+## Returning the palette you asked for with that many colors
+```
+
+```
+## Warning: Removed 149350 rows containing missing values (geom_raster).
+```
+
+![](agroecology_files/figure-html/unnamed-chunk-14-1.png)<!-- -->
+
+
+Vegetation
+
+```r
+pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover_Type_5.tif') %>%
+  projectRaster(disaggregate(elevation, 2), method = 'ngb') %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+    rename(pft = MCD12Q1.A2001001.Land_Cover_Type_5) %>%
+  #filter(!pft %in% c(0, 7:10)) %>%
+  mutate(pft = recode_factor(as.factor(pft),
+                               `0` = 'Water',
+                               `1` = 'Evergreen Needleleaf trees',
+                               `2` = 'Evergreen Broadleaf trees',
+                               `3` = 'Deciduous Needleleaf trees',
+                               `4` = 'Deciduous Broadleaf trees',
+                               `5` = 'Shrub',
+                               `6` = 'Grass',
+                               `7` = 'Cereal crops',
+                               `8` = 'Broad-leaf crops',
+                               `9` = 'Urban and built-up',
+                               `10` =	'Snow and ice',
+                               `11` = 'Barren or sparse vegetation'))
+```
+
+![](agroecology_files/figure-html/unnamed-chunk-15-1.png)<!-- -->
+
+Let's put all these environmental rasters together in a single brick for easier access.
+
+```r
+environment <- brick(slope, prec, gdd5)
+```
 
