@@ -16,7 +16,7 @@ library(MODIS) # land cover data
 library(tidyverse) # for data manipulation and plotting
 library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
-library(gridExtra)
+library(gridExtra) # for arranging plots
 ```
 
 # Modules
@@ -28,19 +28,23 @@ Define parameters controlling the soil fertility dynamics.
 
 ```r
 carrying.capacity <- 100
-degredation.factor <- 0 # c(2, 1, 0)
-regeneration.rate <- 0.05 # c(0.1188, 0.0844, 0.05)
-depletion.rate <- 0.5
+degradation <- tibble(type = c('reversible', 'hysteresis', 'irreversible'), 
+                      degradation_factor = c(0, 1, 2),
+                      regeneration_rate = c(0.05, 0.0844, 0.11880))
+depletion.rate <- 0.25 # .25  to represent biennial fallow, .5 otherwise
 ```
 
 Soil fertility dynamics
 
 ```r
-soil.dynamics <- function(x, population){
-  newsoil <- x + regeneration.rate * x * (x / carrying.capacity) ^ degredation.factor * (1 - x / carrying.capacity) - depletion.rate * population
-  return(max(newsoil, 0))
+soil.dynamics <- function(x, population, soil.type = 'reversible'){
+  params <- filter(degradation, type == soil.type)
+  params$regeneration_rate * x * (x / carrying.capacity) ^ params$degradation_factor * (1 - x / carrying.capacity) - depletion.rate * population
 }
 ```
+
+So if you have 3 or more households per sq km (or 6 or more households practicing biennial fallow) then the soil will always deplete.
+![](agroecology_files/figure-html/unnamed-chunk-1-1.png)<!-- -->
 
 ### Farming
 Agents determine how much land they need, calculate the yields from their land, remember these yields, and harvest from the land.
@@ -76,18 +80,18 @@ yield <- function(fertility, precipitation){
 ```
 
 
-![](agroecology_files/figure-html/unnamed-chunk-1-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-2-1.png)<!-- -->
 
 How agents decide the amount of land they need to farm. The determination of how much land is needed is a function of the household's occupants and labor availability.
 
 ```r
-land.req <- function(population, yield, laborers){
-  land <- wheat.req * population * (1 + seed_proportion) / yield
+land.req <- function(population, yield, laborers, fallow = T){
+  land <- wheat.req * population * (1 + seed_proportion) / yield * ifelse(fallow, 2, 1)
   pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
 }
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-2-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
 
 
 ```r
@@ -96,18 +100,16 @@ farm <- function(households){
     mutate(land = land.req(n_inhabitants, peak_end(yield_memory), laborers),
            yield = this.yield,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * this.yield) #%>%
+           harvest = land * this.yield * (1 - seed_proportion)) #%>%
     #select(-land, -yield)
 }
 
 remember <- function(yield_memory, yield){
   yield_memory <- c(yield, yield_memory)
-  if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:15]
+  if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:max.memory]
   return(yield_memory)
 }
 ```
-
-
 
 Agents use the peak-end rule when accessing memory.
 
@@ -116,6 +118,21 @@ peak_end <- function(x){
   map_dbl(x, ~mean(c(.x[1], min(.x))))
 }
 ```
+
+
+```r
+random.series <- rnorm(100, mean = 200, sd = 50)
+mem <- c()
+for(i in 1:100){
+  mem <- c(mem, mean(c(random.series[i], min(random.series[i:(min(i+14, 100))]))))  
+}
+qplot(x = 1:100, y = rev(random.series), geom = 'line') +
+  geom_line(aes(y = rev(mem)), color = 'red', linetype = 2) +
+  labs(x = 'Year', y = 'Crop Yield', title = 'Impact of peak-end rule on yield memory', subtitle = 'Randomly generated crop yields (black) and resulting "memory" (red), given a 15 year memory length') +
+  theme_minimal()
+```
+
+![](agroecology_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
 
 Finally eat the harvested food, updating storage and food_ratio accordingly
 
@@ -144,15 +161,9 @@ mortality_table <- tibble(
   age = c(0:84),
   rate = c(0.4669, rep(0.0702, 4), rep(c(0.0132, 0.0099, 0.0154, 0.0172, 0.0195, 0.0223, 0.0259, 0.0306, 0.0373, 0.0473, 0.0573, 0.0784, 0.1042, 0.1434, 0.2039, 0.2654), each = 5))
 )
-
-ggplot(mortality_table, aes(age, rate)) +
-  geom_line(color = 'red') +
-  geom_line(data = fertility_table, color = 'blue') +
-  labs(title = 'Fertility and Mortality Rates', subtitle = 'Per capita fertility (blue) and mortality (red) in the Roman Empire', x = 'Age', y = 'Vital rate') +
-  theme_bw()
 ```
 
-![](agroecology_files/figure-html/birth-death-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-7-1.png)<!-- -->
 
 Calculate functions for vital rate elasticities from pre-prepared data.
 
@@ -160,41 +171,8 @@ Calculate functions for vital rate elasticities from pre-prepared data.
 fertility_elasticity <- read_csv('data/fertility_data.csv', skip = 1) %>% 
   rename(food_ratio = X, fertility_reduction = Y) %>%
   gam(fertility_reduction ~ s(food_ratio), dat = .)
-```
-
-```
-## Parsed with column specification:
-## cols(
-##   X = col_double(),
-##   Y = col_double()
-## )
-```
-
-```r
 mort_elast <- read_csv('data/mortality_dataset.csv', skip = 1)
-```
 
-```
-## Warning: Duplicated column names deduplicated: 'X' => 'X_1' [3], 'Y' =>
-## 'Y_1' [4], 'X' => 'X_2' [5], 'Y' => 'Y_2' [6], 'X' => 'X_3' [7], 'Y' =>
-## 'Y_3' [8]
-```
-
-```
-## Parsed with column specification:
-## cols(
-##   X = col_double(),
-##   Y = col_double(),
-##   X_1 = col_double(),
-##   Y_1 = col_double(),
-##   X_2 = col_double(),
-##   Y_2 = col_double(),
-##   X_3 = col_double(),
-##   Y_3 = col_double()
-## )
-```
-
-```r
 survivorship_elasticity <- bind_rows(
     mort_elast[1:2] %>% mutate(age = 1) %>% rename(food_ratio = X, mortality_reduction = Y), 
     mort_elast[3:4] %>% mutate(age = 25) %>% rename(food_ratio = X_1, mortality_reduction = Y_1),
@@ -208,11 +186,9 @@ survivorship_elasticity <- bind_rows(
   arrange(age) %>%
   slice(c(rep(1, 5), rep(2, 20), rep(3, 40), rep(4, 20))) %>%
   mutate(age = 0:84)
-
-plot(fertility_elasticity)
 ```
 
-![](agroecology_files/figure-html/vital-rate-elasticity-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
 
 Birth
 
@@ -268,7 +244,7 @@ Start with the populaiton level parameters, i.e. how many settlements, household
 ```r
 init_settlements <- 1 
 init_households <- 3
-init_inhabitants <- 6
+init_inhabitants <- 2
 init_age <- 25
 ```
 
@@ -302,17 +278,17 @@ nsim <- 300
 precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
 pb <- txtProgressBar(min = 0, max = nsim, style = 3)
 
-for(j in 1:50){
+for(j in 1:10){
 soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
 test <- population$households[[1]]
 for(i in 1:nsim){
-  this.yield <- overlay(soil, precip, fun = yield) %>% getValues()
+  this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * .5 # *.5 for fallow
 test <- test%>% 
   farm %>%
   eat %>%
   birth_death
 
-soil <- soil.dynamics(soil, nrow(test))
+soil <- soil + soil.dynamics(soil, nrow(test), 'reversible')
 sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), fertility = getValues(soil), replicate = j)
 }
 setTxtProgressBar(pb, j)
@@ -367,7 +343,7 @@ slope_dat <- as.data.frame(slope, xy = T, na.rm = T)
 grid.arrange(p1, p2, ncol = 2)
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-11-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-15-1.png)<!-- -->
 
 
 Where is arable land? Calculate the frequency of land with < 5 degree slope within 2.5 km.
@@ -396,7 +372,7 @@ prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
 gdd5_dat <- as.data.frame(gdd5, xy = T, na.rm = T)
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-12-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-16-1.png)<!-- -->
 Soils
 
 ```r
@@ -407,17 +383,7 @@ soils_dat <- as.data.frame(soils, xy =  T, na.rm = T) %>%
   mutate(type = as.factor(type))
 ```
 
-
-```
-## Warning in RColorBrewer::brewer.pal(n, pal): n too large, allowed maximum for palette Accent is 8
-## Returning the palette you asked for with that many colors
-```
-
-```
-## Warning: Removed 149350 rows containing missing values (geom_raster).
-```
-
-![](agroecology_files/figure-html/unnamed-chunk-14-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-18-1.png)<!-- -->
 
 
 Vegetation
@@ -443,7 +409,7 @@ pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover
                                `11` = 'Barren or sparse vegetation'))
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-15-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-19-1.png)<!-- -->
 
 Let's put all these environmental rasters together in a single brick for easier access.
 

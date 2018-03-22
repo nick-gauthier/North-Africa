@@ -17,7 +17,7 @@ library(MODIS) # land cover data
 library(tidyverse) # for data manipulation and plotting
 library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
-library(gridExtra)
+library(gridExtra) # for arranging plots
 ```
 
 # Modules
@@ -131,24 +131,34 @@ farm <- function(households){
     mutate(land = land.req(n_inhabitants, peak_end(yield_memory), laborers),
            yield = this.yield,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * this.yield) #%>%
+           harvest = land * this.yield * (1 - seed_proportion)) #%>%
     #select(-land, -yield)
 }
 
 remember <- function(yield_memory, yield){
   yield_memory <- c(yield, yield_memory)
-  if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:15]
+  if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:max.memory]
   return(yield_memory)
 }
 ```
-
-
 
 Agents use the peak-end rule when accessing memory.
 ```{r}
 peak_end <- function(x){
   map_dbl(x, ~mean(c(.x[1], min(.x))))
 }
+```
+
+```{r}
+random.series <- rnorm(100, mean = 200, sd = 50)
+mem <- c()
+for(i in 1:100){
+  mem <- c(mem, mean(c(random.series[i], min(random.series[i:(min(i+14, 100))]))))  
+}
+qplot(x = 1:100, y = rev(random.series), geom = 'line') +
+  geom_line(aes(y = rev(mem)), color = 'red', linetype = 2) +
+  labs(x = 'Year', y = 'Crop Yield', title = 'Impact of peak-end rule on yield memory', subtitle = 'Randomly generated crop yields (black) and resulting "memory" (red), given a 15 year memory length') +
+  theme_minimal()
 ```
 
 Finally eat the harvested food, updating storage and food_ratio accordingly
@@ -187,7 +197,7 @@ ggplot(mortality_table, aes(age, rate)) +
 ```
 
 Calculate functions for vital rate elasticities from pre-prepared data.
-```{r vital-rate-elasticity}
+```{r vital-rate-elasticity, warning = F, message = F}
 fertility_elasticity <- read_csv('data/fertility_data.csv', skip = 1) %>% 
   rename(food_ratio = X, fertility_reduction = Y) %>%
   gam(fertility_reduction ~ s(food_ratio), dat = .)
@@ -427,7 +437,7 @@ soils_dat <- as.data.frame(soils, xy =  T, na.rm = T) %>%
 ```{r echo = F}
 ggplot(soils_dat, aes(x, y)) +
   geom_raster(aes(fill = type)) +
-  scale_fill_brewer(type = 'qual', name = 'Soil type') +
+  scale_fill_discrete(name = 'Soil type') +
   theme_void() +
   coord_quickmap() +
   labs(title = 'Soils')
