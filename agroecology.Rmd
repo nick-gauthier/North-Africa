@@ -31,7 +31,7 @@ carrying.capacity <- 100
 degradation <- tibble(type = c('reversible', 'hysteresis', 'irreversible'), 
                       degradation_factor = c(0, 1, 2),
                       regeneration_rate = c(0.05, 0.0844, 0.11880))
-depletion.rate <- 0.5 # .25  to represent biennial fallow, .5 otherwise
+depletion.rate <- 0.25 # .25  to represent biennial fallow, .5 otherwise
 ```
 
 Soil fertility dynamics
@@ -111,9 +111,9 @@ How agents decide the amount of land they need to farm. The determination of how
 
 We have capabilities for fallowing, but for simplicity let's turn that off by default
 ```{r land_req}
-land.req <- function(population, yield, laborers, fallow = F){
+land.req <- function(population, yield, laborers, fallow = T){
   land <- wheat.req * population * (1 + seed_proportion) / yield * ifelse(fallow, 2, 1)
-  pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
+  pmin(land, max.ag.labor * laborers * ifelse(fallow, 2, 1) / labor.per.hectare) # constrain by maximum hectares per household 
 }
 ```
 
@@ -263,7 +263,7 @@ die <- function(inhabitants, food_ratio){
 ```
 
 Agents first reproduce, then die, then age, and finally remove households with no inhabiants.
-```{r}
+```{r birthdeath}
 birth_death <- function(households){
   households %>%
     mutate(inhabitants = map2(inhabitants, food_ratio, reproduce),
@@ -275,14 +275,44 @@ birth_death <- function(households){
 }
 ```
 
+If households get larger than 10 inhabitants, they split into two.
+```{r fission}
+fission <- function(households){
+  static.households <- households %>% 
+    filter(n_inhabitants < 10)
+  
+  if(nrow(static.households) == nrow(households)){
+    return(households)
+  } else{
+  tmp <- households %>%
+    filter(n_inhabitants >= 10) %>% 
+    mutate(indices = map(inhabitants, ~sample.int(nrow(.x), nrow(.x) * 0.5)))
+  
+  old <- tmp %>% mutate(storage = .5 * storage,
+                       land = .5 * land,
+                       inhabitants = map2(inhabitants, indices, ~slice(.x, .y)),
+                       n_inhabitants = map_int(inhabitants, nrow))
+  
+  new <- tmp %>% mutate(storage = .5 * storage,
+                land = .5 * land,
+                inhabitants = map2(inhabitants, test, ~slice(.x, -.y)),
+                n_inhabitants = map_int(inhabitants, nrow))
+  
+  return(bind_rows(static.households, old, new) %>%
+    mutate(n_inhabitants = map_int(inhabitants, nrow),
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)))
+  }
+}
+```
+
 
 # Simulation
 Start with the populaiton level parameters, i.e. how many settlements, households, and individuals to start the simulation with.
 
 ```{r pop_params}
 init_settlements <- 1 
-init_households <- 3
-init_inhabitants <- 2
+init_households <- 2
+init_inhabitants <- 3
 init_age <- 25
 ```
 
@@ -295,8 +325,7 @@ create.households <- function(x){
          yield_memory = c(max.yield),
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow),
-           land = land.req(n_inhabitants, peak_end(yield_memory), laborers))
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
 }
 
 create.inhabitants <- function(x){
@@ -312,19 +341,21 @@ Test environment, generate simple raster to represent our environment
 ```{r eval = F}
 arable_proportion <- 0.9
 sim.out <- tibble(year = 0, population = 0, fertility =  0, replicate = 0)
-nsim <- 300
+nsim <- 200
 precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
 pb <- txtProgressBar(min = 0, max = nsim, style = 3)
 
-for(j in 1:10){
+for(j in 1:1){
 soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
 test <- population$households[[1]]
 for(i in 1:nsim){
-  this.yield <- overlay(soil, precip, fun = yield) %>% getValues() # *.5 for fallow
-test <- test%>% 
+  this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * 0.5 # *.5 for fallow
+test <- test %>% 
+  allocate_land %>%
   farm %>%
   eat %>%
-  birth_death
+  birth_death %>%
+  fission
 
 soil <- soil + soil.dynamics(soil, nrow(test), 'reversible')
 sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), fertility = getValues(soil), replicate = j)
