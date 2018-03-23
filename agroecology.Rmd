@@ -35,10 +35,10 @@ depletion.rate <- 0.25 # .25  to represent biennial fallow, .5 otherwise
 ```
 
 Soil fertility dynamics
-```{r soili-dynamics}
+```{r soil-dynamics}
 soil.dynamics <- function(x, population, soil.type = 'reversible'){
   params <- filter(degradation, type == soil.type)
-  params$regeneration_rate * x * (x / carrying.capacity) ^ params$degradation_factor * (1 - x / carrying.capacity) - depletion.rate * population
+  params$regeneration_rate * x * (x / carrying.capacity) ^ params$degradation_factor * (1 - x / carrying.capacity) - depletion.rate * population * 0.5 
 }
 ```
 
@@ -60,7 +60,7 @@ Agents determine how much land they need, calculate the yields from their land, 
 
 First define some parameters relating to food production and consumption.
 ```{r food_params}
-max.yield <- 2000 # maximum possible wheat yield, in kg/ha
+max.yield <- 1500 # maximum possible wheat yield, in kg/ha, should range from 1000 - 2000
 
 calorie.req <- 2582 * 365  # annual individual calorie requirement, derived from daily requirement
 wheat.calories <- 3320 # calories in a kg of wheat
@@ -143,14 +143,17 @@ allocate_land <- function(households){
 ```{r farm_funs}
 farm <- function(households){
   households %>%
-    mutate(yield = this.yield,
+    mutate(yield = yield(soil_fertility, precip) * 0.5,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * this.yield - land * sowing_rate) #%>%
-    #select(-land, -yield)
+           harvest = land * this.yield - land * sowing_rate,
+           soil_fertility = soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
 }
+```
 
+```{r remember}
 remember <- function(yield_memory, yield){
-  yield_memory <- c(yield, yield_memory)
+  yield_memory <- rnorm(1, yield, yield * 0.0333) %>%  #memory is fuzzy
+    c(yield_memory)
   if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:max.memory]
   return(yield_memory)
 }
@@ -325,7 +328,9 @@ create.households <- function(x){
          yield_memory = c(max.yield),
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) %>%
+    allocate_land %>%
+    mutate(soil_fertility = 100)
 }
 
 create.inhabitants <- function(x){
@@ -341,15 +346,16 @@ Test environment, generate simple raster to represent our environment
 ```{r eval = F}
 arable_proportion <- 0.9
 sim.out <- tibble(year = 0, population = 0, fertility =  0, replicate = 0)
-nsim <- 200
-precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
-pb <- txtProgressBar(min = 0, max = nsim, style = 3)
+nsim <- 20
+replicates <- 1
+precip <- 1
+pb <- txtProgressBar(min = 0, max = replicates, style = 3)
 
-for(j in 1:1){
+for(j in 1:replicates){
 soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
 test <- population$households[[1]]
 for(i in 1:nsim){
-  this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * 0.5 # *.5 for fallow
+  #this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * 0.5 # *.5 for fallow
 test <- test %>% 
   allocate_land %>%
   farm %>%
@@ -357,7 +363,6 @@ test <- test %>%
   birth_death %>%
   fission
 
-soil <- soil + soil.dynamics(soil, nrow(test), 'reversible')
 sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), fertility = getValues(soil), replicate = j)
 }
 setTxtProgressBar(pb, j)
@@ -374,9 +379,6 @@ ggplot(sim.out, aes(year, population, group = replicate)) +
 ggplot(sim.out, aes(year, fertility, group = replicate)) +
   geom_line(alpha = .2) +
   theme_minimal()
-
-test
-
 ```
 
 # Environment
