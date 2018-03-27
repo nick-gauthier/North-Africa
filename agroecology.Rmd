@@ -26,7 +26,7 @@ First we define key functions dealing with farming, soil dynamics, and demograph
 ### Soil Dynamics
 
 Define parameters controlling the soil fertility dynamics.
-```{r soil_parameters}
+```{r soil_parameters, eval=FALSE, include=FALSE}
 carrying.capacity <- 100
 degradation <- tibble(type = c('reversible', 'hysteresis', 'irreversible'), 
                       degradation_factor = c(0, 1, 2),
@@ -35,16 +35,16 @@ depletion.rate <- 0.25 # .25  to represent biennial fallow, .5 otherwise
 ```
 
 Soil fertility dynamics
-```{r soil-dynamics}
+```{r soil-dynamics, eval=FALSE, include=FALSE}
 soil.dynamics <- function(x, population, soil.type = 'reversible'){
   params <- filter(degradation, type == soil.type)
-  params$regeneration_rate * x * (x / carrying.capacity) ^ params$degradation_factor * (1 - x / carrying.capacity) - depletion.rate * population * 0.5 
+  params$regeneration_rate * x * (x / carrying.capacity) ^ params$degradation_factor * (1 - x / carrying.capacity) - depletion.rate 
 }
 ```
 
 So if you have 3 or more households per sq km (or 6 or more households practicing biennial fallow) then the soil will always deplete.
-```{r echo = F}
-expand.grid(fertility = 0:100, population = 0:3, soil.type = degradation$type, stringsAsFactors = F) %>%
+```{r eval=FALSE, include=FALSE}
+expand.grid(fertility = 0:100, population = 0:5, soil.type = degradation$type, stringsAsFactors = F) %>%
   mutate(rate = pmap_dbl(list(fertility, population, soil.type), soil.dynamics)) %>%
   mutate(soil.type = factor(soil.type, levels = c('reversible', 'hysteresis', 'irreversible'))) %>%
   ggplot(aes(fertility, rate, group = as.factor(population))) +
@@ -54,6 +54,21 @@ expand.grid(fertility = 0:100, population = 0:3, soil.type = degradation$type, s
   labs(title = 'Impact of population density on soil fertility change', x = 'Soil fertility (%)', y = 'Rate of fertility change') +
   theme_minimal()
 ```
+### Time Allocation
+```{r}
+
+allocate_time <- function(p = 1, b = 1, lf, j = 0.3, q = 0, r = 1, k = 0.4, a = 1, w = 0.2, le = 1 - lf){
+  p * b * lf ^ j * (q + r) ^ k * a ^ (1 - j - k) + w * le
+}
+
+expand.grid(lf = seq(0,1,.01), q = seq(0,1,.01), r = c(.1, .5, 1)) %>%
+  mutate(utility = pmap_dbl(list(lf = lf, q = q, r = r), allocate_time)) %>%
+  ggplot(aes(lf, utility, group = q, color  = q)) +
+  geom_line() +
+  facet_wrap(~as.factor(r)) +
+  theme_minimal()
+```
+
 
 ### Farming
 Agents determine how much land they need, calculate the yields from their land, remember these yields, and harvest from the land.
@@ -108,8 +123,6 @@ grid.arrange(p1, p2, ncol = 2)
 ```
 
 How agents decide the amount of land they need to farm. The determination of how much land is needed is a function of the household's occupants and labor availability.
-
-We have capabilities for fallowing, but for simplicity let's turn that off by default
 ```{r land_req}
 land.req <- function(population, yield, laborers, fallow = T){
   land <- wheat.req * population * (1 + seed_proportion) / yield * ifelse(fallow, 2, 1)
@@ -133,7 +146,7 @@ first, for dev purposes, make a fake environment raster.
 ```{r}
 allocate_land <- function(households){
   households %>% 
-   mutate(land_req = land.req(n_inhabitants, peak_end(yield_memory), laborers),
+   mutate(land_req = 5, #land.req(n_inhabitants, peak_end(yield_memory), laborers),
           total_land_req = sum(land_req),
           land = if_else(total_land_req < (arable_proportion * 100), land_req, land_req / total_land_req * arable_proportion * 100)) %>%
     select(-land_req, -total_land_req)
@@ -146,7 +159,7 @@ farm <- function(households){
     mutate(yield = yield(soil_fertility, precip) * 0.5,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
            harvest = land * this.yield - land * sowing_rate,
-           soil_fertility = soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
+           soil_fertility = 100)#soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
 }
 ```
 
@@ -189,7 +202,6 @@ eat <- function(households){
     select(-old.storage, -total.cal.req, -harvest)
 }
 ```
-
 
 ### Demography
 
@@ -292,12 +304,10 @@ fission <- function(households){
     mutate(indices = map(inhabitants, ~sample.int(nrow(.x), nrow(.x) * 0.5)))
   
   old <- tmp %>% mutate(storage = .5 * storage,
-                       land = .5 * land,
                        inhabitants = map2(inhabitants, indices, ~slice(.x, .y)),
                        n_inhabitants = map_int(inhabitants, nrow))
   
   new <- tmp %>% mutate(storage = .5 * storage,
-                land = .5 * land,
                 inhabitants = map2(inhabitants, test, ~slice(.x, -.y)),
                 n_inhabitants = map_int(inhabitants, nrow))
   
@@ -314,9 +324,8 @@ Start with the populaiton level parameters, i.e. how many settlements, household
 
 ```{r pop_params}
 init_settlements <- 1 
-init_households <- 2
+init_households <- 5
 init_inhabitants <- 3
-init_age <- 25
 ```
 
 Create a 2 villages of 10 households with 6 people in each.
@@ -329,12 +338,11 @@ create.households <- function(x){
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
            laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) %>%
-    allocate_land %>%
     mutate(soil_fertility = 100)
 }
 
 create.inhabitants <- function(x){
-  tibble(age = rep(init_age, x))
+  tibble(age = round(runif(x, 1, 60)))
 }
 
 population <- tibble(settlement = 1:init_settlements,
@@ -343,16 +351,15 @@ population <- tibble(settlement = 1:init_settlements,
 ```
 
 Test environment, generate simple raster to represent our environment
-```{r eval = F}
-arable_proportion <- 0.9
+```{r eval = T}
+library(parallel)
+arable_proportion <- 1.0
 sim.out <- tibble(year = 0, population = 0, fertility =  0, replicate = 0)
-nsim <- 20
-replicates <- 1
-precip <- 1
-pb <- txtProgressBar(min = 0, max = replicates, style = 3)
+nsim <- 1000
+replicates <- 50
+precip <- 1.0
 
-for(j in 1:replicates){
-soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
+sim.out <- mclapply(1:replicates, function(j){
 test <- population$households[[1]]
 for(i in 1:nsim){
   #this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * 0.5 # *.5 for fallow
@@ -360,25 +367,28 @@ test <- test %>%
   allocate_land %>%
   farm %>%
   eat %>%
-  birth_death %>%
-  fission
+  birth_death #%>%
+  #fission
 
-sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), fertility = getValues(soil), replicate = j)
+sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), replicate = j)#, fertility = test$soil_fertility,)
 }
-setTxtProgressBar(pb, j)
-
-}
-close(pb)
-sim.out <- sim.out[-1,]
+return(sim.out[-1,])
+}) %>% bind_rows
 
 
-ggplot(sim.out, aes(year, population, group = replicate)) +
-  geom_line(alpha = .2) +
+ggplot(sim.out, aes(year, population, group = replicate,color = as.factor(replicate))) +
+  #geom_line(alpha = .2) +
+  geom_smooth(alpha = .2) +
   theme_minimal()
 
-ggplot(sim.out, aes(year, fertility, group = replicate)) +
-  geom_line(alpha = .2) +
+sim.out %>%
+  filter(year == nsim) %>%
+  ggplot(aes(x = population)) +
+  geom_density() +
   theme_minimal()
+#ggplot(sim.out, aes(year, fertility, group = replicate)) +
+ # geom_line(alpha = .2) +
+  #theme_minimal()
 ```
 
 # Environment
