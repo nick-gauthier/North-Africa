@@ -68,6 +68,48 @@ expand.grid(lf = seq(0,1,.01), q = seq(0,1,.01), r = c(.1, .5, 1)) %>%
   facet_wrap(~as.factor(r)) +
   theme_minimal()
 ```
+```{r}
+p = 1
+b = 1
+j = 0.3
+q = 0
+r = 1
+k = 0.4
+a = 1
+w = 0.2
+l <- 1
+psi <- .2
+e <- .125
+qmax <- 1
+#region 1
+(j * p * b * a ^ (1-j-k) * r ^ k / w) ^ (1/(1-j))
+
+#region 2
+1 / (j + k) * (k * l + j * (psi - e) - 2 * j * e * r / qmax)
+
+#region 3
+psi - e
+
+######
+allocate_time <- function(p = 1, b = 1, j = 0.3, r = 1, k = 0.4, a = 1){
+
+}
+```
+
+```{r}
+maintain_infra <- function(lm, psi = .2, epsilon = .18, imax = 1){
+  ifelse(0 <= lm & lm < (psi - epsilon), 0,
+  ifelse((psi - epsilon) <= lm & lm <= (psi + epsilon), imax / (2 * epsilon) * (lm - psi + epsilon), imax))
+}
+psi = .2; epsilon = .18
+tibble(lf = seq(0, 1, .001), i = maintain_infra(lf)) %>%
+  ggplot(aes(lf, i)) +
+    geom_vline(xintercept = psi + epsilon, linetype = 2, color = 'grey') +
+  geom_line() +
+  labs(title = 'Impact of infrastructure maintainance on performance',
+       x = 'Labor devoted to maintaining infrastructure', y = 'Infrastructure performance') +
+  theme_minimal()
+```
 
 
 ### Farming
