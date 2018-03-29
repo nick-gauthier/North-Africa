@@ -190,7 +190,7 @@ Here households calculate how much land they need, pull the crop yield from the 
 
 first, for dev purposes, make a fake environment raster.
 ```{r}
-allocate_land <- function(households){
+allocate_land <- function(households, arable_proportion){
   households %>% 
    mutate(land_req = 5, #land.req(n_inhabitants, peak_end(yield_memory), laborers),
           total_land_req = sum(land_req),
@@ -200,11 +200,11 @@ allocate_land <- function(households){
 ```
 
 ```{r farm_funs}
-farm <- function(households){
+farm <- function(households, climatic_yield){
   households %>%
-    mutate(yield = yield(soil_fertility, precip) * 0.5,
+    mutate(yield = calc_yield_reduction(soil_fertility, climatic_yield) * 0.5,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * this.yield - land * sowing_rate,
+           harvest = land * yield - land * sowing_rate,
            soil_fertility = 100)#soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
 }
 ```
@@ -392,38 +392,68 @@ create.inhabitants <- function(x){
 }
 
 population <- tibble(settlement = 1:init_settlements,
+                     x = 1, y = 1,
                      households = init_households) %>%
               mutate(households = map(households, create.households))
 ```
 
-Test environment, generate simple raster to represent our environment
-```{r eval = T}
-library(parallel)
-arable_proportion <- 1.0
-sim.out <- tibble(year = 0, population = 0, fertility =  0, replicate = 0)
-nsim <- 1000
-replicates <- 50
-precip <- 1.0
+Make an environment data table. For now we'll keep it to dummy value for development and testing purposes, see the following section for a "real environment".
 
-sim.out <- mclapply(1:replicates, function(j){
-test <- population$households[[1]]
-for(i in 1:nsim){
-  #this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * 0.5 # *.5 for fallow
-test <- test %>% 
-  allocate_land %>%
-  farm %>%
-  eat %>%
-  birth_death #%>%
-  #fission
-
-sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), replicate = j)#, fertility = test$soil_fertility,)
+```{r}
+environment <- tibble(x = 1, y = 1, arable_proportion = 1, precipitation = 1)
+environment %>% environmental_dynamics()
+left_join(population, environment) 
+```
+```{r}
+# this function takes a settlement (tibble of households), and makes the households do stuff
+household_dynamics <- function(settlement, arable_proportion, yield){
+  settlement %>%
+    allocate_land(arable_proportion) %>%
+    farm(yield) %>%
+    eat %>%
+    birth_death #%>%
+    #fission)
 }
-return(sim.out[-1,])
+
+# this function takes the master dataframe and calculates the per patch climatic yields from per patch precipitation
+environmental_dynamics <- function(population){
+  population %>%
+    mutate(yield = calc_climatic_yield(precipitation))
+}
+```
+
+Calculate population totals for plotting
+```{r}
+calc_pop <- function(population){
+  population %>% 
+    unnest(households) %>% 
+    select(n_inhabitants) %>% 
+    sum
+}
+```
+
+```{r}
+nsim <- 500
+replicates <- 12
+
+sim.out <- tibble(year = 0, population = calc_pop(population), replicate = 0)
+
+sim.out <- mclapply(1:replicates, mc.cores = 3, function(j){
+  test <- population %>% left_join(environment)
+  for(i in 1:nsim){
+  test <- test %>% 
+    environmental_dynamics %>%
+    mutate(households = pmap(list(households, arable_proportion, yield), household_dynamics))
+    
+
+    sim.out <- add_row(sim.out, year = i, population = calc_pop(test), replicate = j)
+  }
+  return(sim.out)
 }) %>% bind_rows
 
 
+
 ggplot(sim.out, aes(year, population, group = replicate,color = as.factor(replicate))) +
-  #geom_line(alpha = .2) +
   geom_smooth(alpha = .2) +
   theme_minimal()
 
