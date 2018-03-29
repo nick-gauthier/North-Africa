@@ -149,7 +149,7 @@ calc_yield_reduction <- function(fertility, climate_yield){
 
 
 ```{r echo=F, fig.wdith = 8}
-p1 <- tibble(fertility = 1:100, yield = yield(fertility, 1)) %>%
+p1 <- tibble(fertility = 1:100, yield = calc_yield_reduction(fertility, 2000)) %>%
   ggplot(aes(fertility, yield)) +
   geom_line() +
   scale_y_continuous(limits = c(0,3000)) +
@@ -157,7 +157,7 @@ p1 <- tibble(fertility = 1:100, yield = yield(fertility, 1)) %>%
        x = 'Soil Fertility (%)', y = 'Wheat Yield (kg/ha)') +
   theme_minimal()
 
-p2 <- tibble(precipitation = seq(0, 2, .1), yield = yield(100, precipitation)) %>%
+p2 <- tibble(precipitation = seq(0, 2, .1), yield = calc_climatic_yield(precipitation)) %>%
   ggplot(aes(precipitation, yield)) +
   geom_line() +
   scale_y_continuous(limits = c(0,3000)) +
@@ -401,8 +401,6 @@ Make an environment data table. For now we'll keep it to dummy value for develop
 
 ```{r}
 environment <- tibble(x = 1, y = 1, arable_proportion = 1, precipitation = 1)
-environment %>% environmental_dynamics()
-left_join(population, environment) 
 ```
 ```{r}
 # this function takes a settlement (tibble of households), and makes the households do stuff
@@ -434,7 +432,7 @@ calc_pop <- function(population){
 
 ```{r}
 nsim <- 500
-replicates <- 12
+replicates <- 3
 
 sim.out <- tibble(year = 0, population = calc_pop(population), replicate = 0)
 
@@ -452,7 +450,6 @@ sim.out <- mclapply(1:replicates, mc.cores = 3, function(j){
 }) %>% bind_rows
 
 
-
 ggplot(sim.out, aes(year, population, group = replicate,color = as.factor(replicate))) +
   geom_smooth(alpha = .2) +
   theme_minimal()
@@ -462,9 +459,6 @@ sim.out %>%
   ggplot(aes(x = population)) +
   geom_density() +
   theme_minimal()
-#ggplot(sim.out, aes(year, fertility, group = replicate)) +
- # geom_line(alpha = .2) +
-  #theme_minimal()
 ```
 
 # Environment
@@ -479,11 +473,12 @@ bbox <- extent(5, 11.5, 34, 37.5)
 Import SRTM GDEM data for the elevation basemap.
 ```{r elevation}
 elevation <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
-elev_dat <- as.data.frame(elevation, xy =  T, na.rm = T) %>%
-  rename(elevation = SRTM_1km)
 ```
 
 ```{r echo = F}
+elev_dat <- as.data.frame(elevation, xy =  T, na.rm = T) %>%
+  rename(elevation = SRTM_1km)
+
 p1 <- ggplot(elev_dat, aes(x, y)) +
   geom_raster(aes(fill = elevation)) +
   scale_fill_gradientn(colours = terrain.colors(10), name = 'Meters', guide = 'legend', breaks = seq(500,2000,500)) +
@@ -493,38 +488,63 @@ p1 <- ggplot(elev_dat, aes(x, y)) +
   theme(legend.position='bottom')
 ```
 
-Calculate slope in degrees from the SRTM elevation.
+Calculate slope in degrees from 90m SRTM elevation (90m data from http://www.earthenv.org/DEM).
 ```{r slope}
-slope <- terrain(elevation, opt = 'slope', unit = 'degrees')
-slope_dat <- as.data.frame(slope, xy = T, na.rm = T)
+elev.list <- list.files('data/topography/', pattern = 'bil$', full.names = T, recursive = T) %>%
+  map(raster)
+elev.list$fun <- mean
+
+slope <- do.call(mosaic, elev.list) %>% 
+  crop(bbox) %>%
+  terrain(opt = 'slope', unit = 'degrees')
 ```
 
 ```{r echo = F}
-p2 <- ggplot(slope_dat, aes(x, y)) +
+p2 <-  aggregate(slope, fact = 10, fun = median) %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x, y)) +
   geom_raster(aes(fill = slope)) +
   scale_fill_viridis(name = 'Degrees', option = 'B', guide = 'legend') +
   theme_void() +
   coord_quickmap() +
   labs(title = 'Slope') +
   theme(legend.position='bottom')
-```
 
-```{r}
 grid.arrange(p1, p2, ncol = 2)
 ```
 
 
-Where is arable land? Calculate the frequency of land with < 5 degree slope within 2.5 km.
+Where is arable land? Calculate the proportion of land with =< 5 degree slope. Also find land with slope between 5 and 15 degrees, as potential land for terracing.
 ```{r arable_land}
-focalWeight(slope < 5, 0.008333333 * 2, type = 'circle') %>%
-  focal(slope < 5, ., sum) %>%
-  as.data.frame(xy = T, na.rm = T) %>%
+arable_proportion <- (slope <= 5) %>% 
+  aggregate(fact = 10, fun = sum) %>% 
+  mask(elevation) %>%
+  `/`(100)
+
+terraceable_proportion <- (slope > 5 & slope <= 15) %>% 
+  aggregate(fact = 10, fun = sum) %>% 
+  mask(elevation) %>%
+  `/`(100)
+```
+
+```{r echo = F}
+p1 <- as.data.frame(arable_proportion, xy = T, na.rm = T) %>%
   ggplot(aes(x, y)) +
   geom_raster(aes(fill = layer)) +
-  scale_fill_viridis(name = 'Proportion \narable land') +
+  scale_fill_viridis(name = 'Proportion of\n arable land') +
   theme_void() +
   coord_quickmap() +
   labs(title = 'Arable land')
+
+p2 <- as.data.frame(terraceable_proportion, xy = T, na.rm = T) %>%
+  ggplot(aes(x, y)) +
+  geom_raster(aes(fill = layer)) +
+  scale_fill_viridis(name = 'Proportion of land\n suitable for terracing') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Terrace-able land')
+
+grid.arrange(p1, p2, ncol = 2)
 ```
 
 Now import temperature and precipitation data.
