@@ -18,6 +18,7 @@ library(tidyverse) # for data manipulation and plotting
 library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
 library(gridExtra) # for arranging plots
+library(parallel) # for parallelization
 ```
 
 # Modules
@@ -135,10 +136,13 @@ production_elasticity <- 0.2
 
 Crop yields are determined by rainfall and soil fertility.
 ```{r yields}
-yield <- function(fertility, precipitation){
+calc_climatic_yield <- function(precipitation){
+  max.yield * pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
+}
+
+calc_yield_reduction <- function(fertility, climate_yield){
   f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
-  p.reduction <- pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
-  return(max.yield * f.reduction  * p.reduction)
+  return(f.reduction  * climate_yield)
 } 
 #todo, replace with gams!
 ```
