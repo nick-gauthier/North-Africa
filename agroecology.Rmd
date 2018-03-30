@@ -203,7 +203,7 @@ allocate_land <- function(households, arable_proportion){
 farm <- function(households, climatic_yield){
   households %>%
     mutate(yield = climatic_yield * .5, #calc_yield_reduction(soil_fertility, climatic_yield) * 0.5,
-           yield_memory = map2(.data$yield_memory, .data$yield, remember),
+           #yield_memory = map2(.data$yield_memory, .data$yield, remember),
            harvest = land * yield - land * sowing_rate,
            soil_fertility = 100)#soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
 }
@@ -340,14 +340,17 @@ reproduce <- function(inhabitants, food_ratio){
 
 Death
 ```{r}
-die <- function(inhabitants, food_ratio){
+die <- function(inhabitants){
   inhabitants %>%
+    unnest %>%  # running die on the unnested dataframe, rather than mapping as in reproduce, leads to some spead improvements
     inner_join(mortality_table, by = 'age') %>%
     inner_join(survivorship_elasticity, by = 'age') %>%
-    mutate(survivorship_reduction = ifelse(food_ratio >= 1, 1, map_dbl(model, ~predict(.x, list(food_ratio = food_ratio)))),
+    mutate(survivorship_reduction = ifelse(food_ratio >= 1, 1, map2_dbl(model, food_ratio, ~predict(.x, list(food_ratio = .y)))),
            dead = ((1 - rate) * survivorship_reduction) < runif(n())) %>%
     filter(dead == F) %>%
-    select(age)
+    mutate(age = age + 1) %>%
+    select(-survivorship_reduction, -dead, -rate, -model) %>%
+    nest(age, .key = inhabitants)
 }
 ```
 
@@ -355,12 +358,10 @@ Agents first reproduce, then die, then age, and finally remove households with n
 ```{r birthdeath}
 birth_death <- function(households){
   households %>%
-    mutate(inhabitants = map2(inhabitants, food_ratio, reproduce),
-           inhabitants = map2(inhabitants, food_ratio, die),
-           inhabitants = map(inhabitants, ~mutate(.x, age = age + 1)),
-           n_inhabitants = map_int(inhabitants, nrow),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) %>%
-    filter(n_inhabitants > 0)
+    mutate(inhabitants = map2(inhabitants, food_ratio, reproduce)) %>%
+    die %>% 
+    mutate(n_inhabitants = map_int(inhabitants, nrow),
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
 }
 ```
 
@@ -445,7 +446,7 @@ household_dynamics <- function(settlement, arable_prop, yield){
 # this function takes the master dataframe and calculates the per patch climatic yields from per patch precipitation
 environmental_dynamics <- function(population){
   population %>%
-    mutate(yield = calc_climatic_yield(precipitation))
+    mutate(climatic_yield = calc_climatic_yield(precipitation))
 }
 ```
 
@@ -459,9 +460,9 @@ calc_pop <- function(population){
 }
 ```
 
-```{r}
-nsim <- 300
-replicates <- 1
+```{r simulation}
+nsim <- 1000
+replicates <- 40
 
 set.seed(1000)
 system.time(
@@ -471,16 +472,19 @@ sim.out <- mclapply(1:replicates, mc.cores = 4, function(j){
   for(i in 1:nsim){
   test <- test %>% 
     environmental_dynamics %>%
-    mutate(households = pmap(list(households, arable_prop, yield), household_dynamics))
+    mutate(households = pmap(list(households, arable_prop, climatic_yield), household_dynamics))
     
     sim.out.tmp[i + 1,] <- c(i, calc_pop(test), j)
   }
   return(sim.out.tmp)
 }) %>% bind_rows
 )
+```
+
+```{r sim-plots}
 ggplot(sim.out, aes(year, population, group = replicate)) +
-  geom_smooth(aes(color = as.factor(replicate)), alpha = .2) +
-  geom_line(alpha = .1) +
+  geom_smooth(aes(color = as.factor(replicate))) +
+  #geom_line(alpha = .1) +
   theme_minimal()
 
 sim.out %>%
