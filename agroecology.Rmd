@@ -19,6 +19,7 @@ library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
 library(gridExtra) # for arranging plots
 library(parallel) # for parallelization
+library(demogR) # leslie matrices
 ```
 
 # Modules
@@ -251,6 +252,34 @@ eat <- function(households){
 
 ### Demography
 
+#### Deterministic Demography
+```{r leslie-matrix, eval=FALSE, include=FALSE}
+model_west <- cdmltw(sex = 'F')
+#survivorship <- model_west$nLx[3,]
+#fertility <- c(0, 0, 0, 0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+leslie <- leslie.matrix(survivorship, fertility)
+project.leslie(leslie, rep(1, 10), tmax = 10, pop.sum = T) %>% plot
+
+
+plot(survivorship)
+plot(model_west$nmx[3,] * model_west$width / (1 + model_west$nmx[3,] * (model_west$width - model_west$nax[3,])))
+plot(mortality_table$rate)
+```
+
+```{r eval=FALSE, include=FALSE}
+age_classes <- c(0, 1, seq(5, 95, 5))
+
+tibble(age = age_classes,
+       survivorship = model_west$nqx[3,],
+       fertility = fertility) %>%
+  gather(var, value, survivorship:fertility) %>%
+ggplot(aes(age, value, color = var)) +
+  geom_line() +
+  labs(title = 'Fertility and Mortality Rates', subtitle = 'Per capita fertility (blue) and mortality (red) in the Roman Empire', x = 'Age', y = 'Vital rate') +
+  theme_bw()
+```
+
+#### Stochastic Demography
 Generate fertility and mortality tables from pre-prepared data.
 ```{r birth-death}
 fertility_table <- tibble(
