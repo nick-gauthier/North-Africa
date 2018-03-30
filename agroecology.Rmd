@@ -142,8 +142,7 @@ calc_climatic_yield <- function(precipitation){
 }
 
 calc_yield_reduction <- function(fertility, climate_yield){
-  f.reduction <- pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
-  return(f.reduction  * climate_yield)
+  climate_yield * pmax(0, 0.19 * log(fertility / 100) + 1)  # fertility impact on yields
 } 
 #todo, replace with gams!
 ```
@@ -203,7 +202,7 @@ allocate_land <- function(households, arable_proportion){
 ```{r farm_funs}
 farm <- function(households, climatic_yield){
   households %>%
-    mutate(yield = calc_yield_reduction(soil_fertility, climatic_yield) * 0.5,
+    mutate(yield = climatic_yield * .5, #calc_yield_reduction(soil_fertility, climatic_yield) * 0.5,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
            harvest = land * yield - land * sowing_rate,
            soil_fertility = 100)#soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
@@ -429,13 +428,14 @@ population <- tibble(settlement = 1:init_settlements,
 Make an environment data table. For now we'll keep it to dummy value for development and testing purposes, see the following section for a "real environment".
 
 ```{r}
-environment <- tibble(x = 1, y = 1, arable_proportion = 1, precipitation = 1)
+environment <- tibble(x = 1, y = 1, arable_prop = 1, precipitation = 1)
 ```
+
 ```{r}
 # this function takes a settlement (tibble of households), and makes the households do stuff
-household_dynamics <- function(settlement, arable_proportion, yield){
+household_dynamics <- function(settlement, arable_prop, yield){
   settlement %>%
-    allocate_land(arable_proportion) %>%
+    allocate_land(arable_prop) %>%
     farm(yield) %>%
     eat %>%
     birth_death #%>%
@@ -460,27 +460,27 @@ calc_pop <- function(population){
 ```
 
 ```{r}
-nsim <- 500
-replicates <- 3
+nsim <- 300
+replicates <- 1
 
-sim.out <- tibble(year = 0, population = calc_pop(population), replicate = 0)
-
-sim.out <- mclapply(1:replicates, mc.cores = 3, function(j){
+set.seed(1000)
+system.time(
+sim.out <- mclapply(1:replicates, mc.cores = 4, function(j){
   test <- population %>% left_join(environment)
+  sim.out.tmp <- tibble(year = rep(0, nsim + 1), population = calc_pop(population), replicate = j)
   for(i in 1:nsim){
   test <- test %>% 
     environmental_dynamics %>%
-    mutate(households = pmap(list(households, arable_proportion, yield), household_dynamics))
+    mutate(households = pmap(list(households, arable_prop, yield), household_dynamics))
     
-
-    sim.out <- add_row(sim.out, year = i, population = calc_pop(test), replicate = j)
+    sim.out.tmp[i + 1,] <- c(i, calc_pop(test), j)
   }
-  return(sim.out)
+  return(sim.out.tmp)
 }) %>% bind_rows
-
-
-ggplot(sim.out, aes(year, population, group = replicate,color = as.factor(replicate))) +
-  geom_smooth(alpha = .2) +
+)
+ggplot(sim.out, aes(year, population, group = replicate)) +
+  geom_smooth(aes(color = as.factor(replicate)), alpha = .2) +
+  geom_line(alpha = .1) +
   theme_minimal()
 
 sim.out %>%
