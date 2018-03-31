@@ -18,8 +18,7 @@ library(tidyverse) # for data manipulation and plotting
 library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
 library(gridExtra) # for arranging plots
-library(parallel) # for parallelization
-library(demogR) # leslie matrices
+library(pbapply) # for progress bar and parallelization
 ```
 
 # Modules
@@ -200,12 +199,12 @@ allocate_land <- function(households, arable_proportion){
 ```
 
 ```{r farm_funs}
-farm <- function(households, climatic_yield){
+farm <- function(households){
   households %>%
     mutate(yield = climatic_yield * .5, #calc_yield_reduction(soil_fertility, climatic_yield) * 0.5,
            #yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * yield - land * sowing_rate,
-           soil_fertility = 100)#soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
+           harvest = land * yield - land * sowing_rate) %>% select(-yield)#,
+           #soil_fertility = 100)#soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
 }
 ```
 
@@ -253,6 +252,8 @@ eat <- function(households){
 
 #### Deterministic Demography
 ```{r leslie-matrix, eval=FALSE, include=FALSE}
+library(demogR) # leslie matrices
+
 model_west <- cdmltw(sex = 'F')
 #survivorship <- model_west$nLx[3,]
 #fertility <- c(0, 0, 0, 0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
@@ -284,7 +285,8 @@ Generate fertility and mortality tables from pre-prepared data.
 fertility_table <- tibble(
   age = 10:49,
   rate = rep(c(0.022, 0.232, 0.343, 0.367, 0.293, 0.218, 0.216, 0.134), each = 5)
-)
+) %>%
+  .[-1:-2,]
 mortality_table <- tibble(
   age = c(0:84),
   rate = c(0.4669, rep(0.0702, 4), rep(c(0.0132, 0.0099, 0.0154, 0.0172, 0.0195, 0.0223, 0.0259, 0.0306, 0.0373, 0.0473, 0.0573, 0.0784, 0.1042, 0.1434, 0.2039, 0.2654), each = 5))
@@ -327,8 +329,7 @@ reproduce <- function(inhabitants, food_ratio){
   fertility_reduction <- ifelse(food_ratio >= 1, 1, predict(fertility_elasticity, list(food_ratio = food_ratio)))
   
   babies <- inhabitants %>%
-    filter(age >= 12 & age < 50) %>% # only individuals of child bearing age reproduce
-    inner_join(fertility_table, by = 'age') %>%  # find the fertility rate corresponding to the individual's age
+    inner_join(fertility_table, by = 'age') %>%  # find the fertility rate corresponding to the individual's age, inner join makes sure only those of child bearing age reproduce
     mutate(baby = (rate / 2 * fertility_reduction) > runif(n())) %>%  # divide by two to make everyone female ...
     .$baby %>% # select just the babies column
     sum  # add it up to determine the number of newborns in the house
@@ -409,11 +410,12 @@ create.households <- function(x){
   tibble(household = 1:x,
          n_inhabitants = init_inhabitants,
          storage = n_inhabitants * wheat.req,
-         yield_memory = c(max.yield),
+         #yield_memory = c(max.yield),
+         land = 5,
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) %>%
-    mutate(soil_fertility = 100)
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) #%>%
+    #mutate(soil_fertility = 100)
 }
 
 create.inhabitants <- function(x){
@@ -454,31 +456,29 @@ Calculate population totals for plotting
 ```{r}
 calc_pop <- function(population){
   population %>% 
-    unnest(households) %>% 
-    select(n_inhabitants) %>% 
+    unnest(households) %>%
+    .$n_inhabitants %>%
     sum
 }
 ```
 
 ```{r simulation}
-nsim <- 1000
-replicates <- 40
+nsim <- 750
+replicates <- 8
 
-set.seed(1000)
-system.time(
-sim.out <- mclapply(1:replicates, mc.cores = 4, function(j){
+sim.out <- pblapply(1:replicates, cl = 4, function(j){
   test <- population %>% left_join(environment)
-  sim.out.tmp <- tibble(year = rep(0, nsim + 1), population = calc_pop(population), replicate = j)
+  sim.out.tmp <- tibble(year = rep(0, nsim + 1), population = c(calc_pop(population), rep(0, nsim)), replicate = j)
   for(i in 1:nsim){
+    if(nrow(test %>% unnest) > 0){
   test <- test %>% 
     environmental_dynamics %>%
     mutate(households = pmap(list(households, arable_prop, climatic_yield), household_dynamics))
-    
+    }
     sim.out.tmp[i + 1,] <- c(i, calc_pop(test), j)
   }
   return(sim.out.tmp)
 }) %>% bind_rows
-)
 ```
 
 ```{r sim-plots}
@@ -534,6 +534,7 @@ slope <- do.call(mosaic, elev.list) %>%
 
 ```{r echo = F}
 p2 <-  aggregate(slope, fact = 10, fun = median) %>%
+  mask(elevation) %>%
   as.data.frame(xy = T, na.rm = T) %>%
   ggplot(aes(x, y)) +
   geom_raster(aes(fill = slope)) +
@@ -547,7 +548,7 @@ grid.arrange(p1, p2, ncol = 2)
 ```
 
 
-Where is arable land? Calculate the proportion of land with =< 5 degree slope. Also find land with slope between 5 and 15 degrees, as potential land for terracing.
+Where is the arable land? Calculate the proportion of land with =< 5 degree slope. Also find land with slope between 5 and 15 degrees, as potential land for terracing.
 ```{r arable_land}
 arable_proportion <- (slope <= 5) %>% 
   aggregate(fact = 10, fun = sum) %>% 
@@ -582,7 +583,7 @@ grid.arrange(p1, p2, ncol = 2)
 
 Now import temperature and precipitation data.
 ```{r climate}
-prec <- brick('data/CHELSA/prec_1km.tif') %>% sum
+prec <- brick('data/CHELSA/prec_1km.tif') %>% sum %>% projectRaster(elevation)
 gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
 
 prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
@@ -663,6 +664,71 @@ ggplot(pft, aes(x, y)) +
 
 Let's put all these environmental rasters together in a single brick for easier access.
 ```{r}
-environment <- brick(slope, prec, gdd5)
+environment <- brick(arable_proportion, prec) %>%
+  as.data.frame(na.rm = T, xy = T, centroids = T) %>%
+  as_tibble %>%
+  remove_rownames %>%
+  rename(arable_prop = layer.1, precipitation = layer.2) %>%
+  mutate(precipitation = precipitation / 1000,
+         x = round(x, 6), y = round(y, 6))
+environment
+```
+ 
+ Now import archaeological data
+```{r}
+library(pleiades)
+
+settlement_locations <- pl_search_places() %>%
+  filter(locationPrecision == 'precise') %>%
+  select(title, type = featureTypes, description, 
+         lon = reprLong, lat = reprLat, 
+         periods = timePeriods, minDate, maxDate, id, tags) %>%
+  filter(between(lat, 34, 37.5) & between(lon, 5, 11.5)) %>%
+  collect  %>%
+  filter(str_detect(periods, 'R')) %>%
+  filter(str_detect(type, 'settlement'))
+```
+ 
+```{r echo = F}
+ggplot(settlement_locations, aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
+```
+```{r}
+init_households <- 1
+init_inhabitants <- 4
+
+population <- settlement_locations %>%
+  select(lon:lat) %>%                        # get the x and y coordinates of settlements
+  rasterize(elevation, fun = 'count') %>%    # create a raster representing the count of settlements in each cell
+  mask(elevation) %>%
+  as.data.frame(xy = T, na.rm = T, centroids = T) %>%
+  remove_rownames %>%
+  as.tibble %>%
+  mutate(x = round(x, 6), y = round(y, 6)) %>%   # the coordinates here and in the environment raster look the same, but need to be rounded to correct for floating point inequality issues
+  select(-layer) %>%
+  mutate(households = init_households,
+         households = map(households, create.households))
+```
+
+```{r}
+nsim <- 200
+
+
+test <- left_join(population, environment)
+system.time(
+for(i in 1:nsim){
+  test <- test %>% 
+    environmental_dynamics %>%
+    household_dynamics
+  }
+)
+```
+```{r}
+ggplot(test %>% unnest, aes(x,y)) +
+geom_point(aes(size = n_inhabitants)) +
+    coord_quickmap()
 ```
 
