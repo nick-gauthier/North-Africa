@@ -11,21 +11,28 @@ knitr::opts_chunk$set(echo = TRUE)
 library(raster)
 library(tidyverse)
 library(mgcv)
-library(SPEI)
-library(fields)
+#library(SPEI)
+#library(fields)
 #devtools::install_github("MatMatt/MODIS", ref = "develop")
-library(MODIS)
+#library(MODIS)
+library(rasterVis)
 ```
 
 ```{r}
-bbox <- extent(-10, 20, 28, 38)
+bbox <- extent(5, 11.5, 34, 37.5)
+# broader extent -- bbox <- extent(-10, 20, 28, 38)
+```
 
-temp <- brick('Data/CHELSA/temp.nc') %>% crop(bbox)
+```{r}
+temp <- brick('data/CHELSA/temp_1km.tif')
 t_warm <- max(temp)
 t_cold <- min(temp)
-alpha <- raster('Data/CHELSA/alpha.nc') %>% crop(bbox)
-gdd5 <- raster('Data/gdd5_global.tif') %>% crop(bbox)
+gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
+alpha <- raster('data/CHELSA/alpha_1km.tif')
+```
 
+
+```{r}
 modern_predictors <- brick(c(t_warm, t_cold, alpha,gdd5))
 names(modern_predictors) <- c('t_warm', 't_cold', 'alpha', 'gdd5')
 rm(temp, t_warm, t_cold, alpha, gdd5)
@@ -36,19 +43,21 @@ Import Modis PFT data
 ```{r}
 #lpdaacLogin()
 MODISoptions(localArcPath = '~/MODIS/', outDirPath = 'Data/MODIS', dlmethod = 'wget', MODISserverOrder = 'LPDAAC', quiet = T)
-MODISoptions()
-pft <- runGdal('MCD12Q1', collection = '051', extent = bbox, SDSstring = "0000100000000000", begin = '2001-01-01', end = '2001-01-01')
 
-pft <- raster('Data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover_Type_5.tif')
+pft <- runGdal('MCD12Q1', collection = '051', extent = bbox, SDSstring = "0000100000000000", begin = '2001-01-01', end = '2001-01-01')
+```
+
+```{r}
+pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover_Type_5.tif') %>%
+  projectRaster(crs = '+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0', method = 'ngb') %>%
+  crop(bbox)
+names(pft) <- 'pft'
 
 modern_predictors <- projectRaster(modern_predictors, pft)
-names(pft) <- 'pft'
-plot(pft)
 plot(pft, modern_predictors)
 
-
-  test <- pft %>%
-  as.data.frame(xy = T, na.rm = T) #%>%
+pft_dat <- pft %>%
+  as.data.frame(xy = T, na.rm = T) %>%
   filter(!pft %in% c(0, 7:10)) %>%
   mutate(pft = recode_factor(as.factor(pft),
                                `1` = 'Evergreen Needleleaf trees',
@@ -59,11 +68,11 @@ plot(pft, modern_predictors)
                                `6` = 'Grass',
                                `11` = 'Barren or sparse vegetation'))
 
-lc_colors <- c('#016400', '#018200', '#97bf47','#dcce00',  '#fffbc3')
+lc_colors <- c('#008000', '#00FF00', '#99CC00', '#99FF99', '#FFCC99', '#FF9900', '#808080') 
 
-ggplot(test, aes(x, y)) + 
+ggplot(pft_dat, aes(x, y)) + 
   geom_tile(aes(fill = pft)) + 
-  #scale_fill_manual(values = lc_colors) + 
+  scale_fill_manual(values = lc_colors) + 
   theme_void() + 
   coord_fixed()
 ```
@@ -85,8 +94,8 @@ dat <- brick(c(pft, modern_predictors)) %>%
   mutate(pft_class = if_else(pft_class == 7, 0, pft_class))
 
 
-sample_guide <- dat %>% group_by(pft) %>% count %>% mutate(n  = ifelse(n > 300000, 30000, n))
-dat2 <- dat %>% nest(-pft) %>% left_join(sample_guide) %>% mutate(Sample = map2(data, n, sample_n)) %>% unnest(Sample)
+#sample_guide <- dat %>% group_by(pft) %>% count %>% mutate(n  = ifelse(n > 300000, 30000, n))
+#dat2 <- dat %>% nest(-pft) %>% left_join(sample_guide) %>% mutate(Sample = map2(data, n, sample_n)) %>% unnest(Sample)
 ```
 
 ```{r}
@@ -97,7 +106,7 @@ mod <- gam(list(pft_class
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr')), 
-           family = multinom(K = 6), method = 'REML', select = F, data = dat2, optimizer = 'perf')
+           family = multinom(K = 6), method = 'REML', select = F, data = dat, optimizer = 'perf')
 
 saveRDS(mod, 'mod')
 mod2 <- readRDS('mod2')
@@ -246,9 +255,9 @@ ggplot(lc_mh, aes(x, y)) +
 
 ## whats the difference between climate models
 ```{r}
-prec <- brick('Data/CHELSA/prec.nc') %>% crop(bbox)
-tmin <- brick('Data/CHELSA/tmin.nc') %>% crop(bbox)
-tmax <- brick('Data/CHELSA/tmax.nc') %>% crop(bbox)
+prec <- brick('data/CHELSA/prec.nc') %>% crop(bbox)
+tmin <- brick('data/CHELSA/tmin.nc') %>% crop(bbox)
+tmax <- brick('data/CHELSA/tmax.nc') %>% crop(bbox)
 
 trace.prec <- (brick('~/gdrive/Projects/Neolithic Spread/trace.01-36.22000BP.cam2.PRECC.22000BP_decavgDJF_400BCE.nc') +
   brick('~/gdrive/Projects/Neolithic Spread/trace.01-36.22000BP.cam2.PRECL.22000BP_decavgDJF_400BCE.nc')) %>% 
