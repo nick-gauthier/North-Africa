@@ -39,7 +39,7 @@ Soil fertility dynamics
 ```r
 soil.dynamics <- function(x, population, soil.type = 'reversible'){
   params <- filter(degradation, type == soil.type)
-  params$regeneration_rate * x * (x / carrying.capacity) ^ params$degradation_factor * (1 - x / carrying.capacity) - depletion.rate * population
+  params$regeneration_rate * x * (x / carrying.capacity) ^ params$degradation_factor * (1 - x / carrying.capacity) - depletion.rate * population * 0.5 
 }
 ```
 
@@ -52,7 +52,7 @@ Agents determine how much land they need, calculate the yields from their land, 
 First define some parameters relating to food production and consumption.
 
 ```r
-max.yield <- 2000 # maximum possible wheat yield, in kg/ha
+max.yield <- 1500 # maximum possible wheat yield, in kg/ha, should range from 1000 - 2000
 
 calorie.req <- 2582 * 365  # annual individual calorie requirement, derived from daily requirement
 wheat.calories <- 3320 # calories in a kg of wheat
@@ -87,25 +87,42 @@ How agents decide the amount of land they need to farm. The determination of how
 ```r
 land.req <- function(population, yield, laborers, fallow = T){
   land <- wheat.req * population * (1 + seed_proportion) / yield * ifelse(fallow, 2, 1)
-  pmin(land, max.ag.labor * laborers / labor.per.hectare) # constrain by maximum hectares per household 
+  pmin(land, max.ag.labor * laborers * ifelse(fallow, 2, 1) / labor.per.hectare) # constrain by maximum hectares per household 
 }
 ```
 
 ![](agroecology_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
 
+Here households calculate how much land they need, pull the crop yield from the environment, remember the yield, and determine their harvests by multiplying the yield by the amount of land they have (also removing some of the crop to save as seed for next year).
+
+first, for dev purposes, make a fake environment raster.
+
+```r
+allocate_land <- function(households){
+  households %>% 
+   mutate(land_req = land.req(n_inhabitants, peak_end(yield_memory), laborers),
+          total_land_req = sum(land_req),
+          land = if_else(total_land_req < (arable_proportion * 100), land_req, land_req / total_land_req * arable_proportion * 100)) %>%
+    select(-land_req, -total_land_req)
+}
+```
+
 
 ```r
 farm <- function(households){
   households %>%
-    mutate(land = land.req(n_inhabitants, peak_end(yield_memory), laborers),
-           yield = this.yield,
+    mutate(yield = yield(soil_fertility, precip) * 0.5,
            yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * this.yield * (1 - seed_proportion)) #%>%
-    #select(-land, -yield)
+           harvest = land * this.yield - land * sowing_rate,
+           soil_fertility = soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
 }
+```
 
+
+```r
 remember <- function(yield_memory, yield){
-  yield_memory <- c(yield, yield_memory)
+  yield_memory <- rnorm(1, yield, yield * 0.0333) %>%  #memory is fuzzy
+    c(yield_memory)
   if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:max.memory]
   return(yield_memory)
 }
@@ -132,7 +149,7 @@ qplot(x = 1:100, y = rev(random.series), geom = 'line') +
   theme_minimal()
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
 
 Finally eat the harvested food, updating storage and food_ratio accordingly
 
@@ -146,7 +163,6 @@ eat <- function(households){
     select(-old.storage, -total.cal.req, -harvest)
 }
 ```
-
 
 ### Demography
 
@@ -163,7 +179,7 @@ mortality_table <- tibble(
 )
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-7-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
 
 Calculate functions for vital rate elasticities from pre-prepared data.
 
@@ -187,8 +203,6 @@ survivorship_elasticity <- bind_rows(
   slice(c(rep(1, 5), rep(2, 20), rep(3, 40), rep(4, 20))) %>%
   mutate(age = 0:84)
 ```
-
-![](agroecology_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
 
 Birth
 
@@ -236,6 +250,37 @@ birth_death <- function(households){
 }
 ```
 
+If households get larger than 10 inhabitants, they split into two.
+
+```r
+fission <- function(households){
+  static.households <- households %>% 
+    filter(n_inhabitants < 10)
+  
+  if(nrow(static.households) == nrow(households)){
+    return(households)
+  } else{
+  tmp <- households %>%
+    filter(n_inhabitants >= 10) %>% 
+    mutate(indices = map(inhabitants, ~sample.int(nrow(.x), nrow(.x) * 0.5)))
+  
+  old <- tmp %>% mutate(storage = .5 * storage,
+                       land = .5 * land,
+                       inhabitants = map2(inhabitants, indices, ~slice(.x, .y)),
+                       n_inhabitants = map_int(inhabitants, nrow))
+  
+  new <- tmp %>% mutate(storage = .5 * storage,
+                land = .5 * land,
+                inhabitants = map2(inhabitants, test, ~slice(.x, -.y)),
+                n_inhabitants = map_int(inhabitants, nrow))
+  
+  return(bind_rows(static.households, old, new) %>%
+    mutate(n_inhabitants = map_int(inhabitants, nrow),
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)))
+  }
+}
+```
+
 
 # Simulation
 Start with the populaiton level parameters, i.e. how many settlements, households, and individuals to start the simulation with.
@@ -243,8 +288,8 @@ Start with the populaiton level parameters, i.e. how many settlements, household
 
 ```r
 init_settlements <- 1 
-init_households <- 3
-init_inhabitants <- 2
+init_households <- 2
+init_inhabitants <- 3
 init_age <- 25
 ```
 
@@ -258,11 +303,12 @@ create.households <- function(x){
          yield_memory = c(max.yield),
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow))
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) %>%
+    mutate(soil_fertility = 100)
 }
 
 create.inhabitants <- function(x){
-  tibble(age = rep(25, x))
+  tibble(age = rep(init_age, x))
 }
 
 population <- tibble(settlement = 1:init_settlements,
@@ -273,23 +319,25 @@ population <- tibble(settlement = 1:init_settlements,
 Test environment, generate simple raster to represent our environment
 
 ```r
+arable_proportion <- 0.9
 sim.out <- tibble(year = 0, population = 0, fertility =  0, replicate = 0)
-nsim <- 300
-precip <- raster(nrow = 1, ncol = 1) %>% setValues(1)
-pb <- txtProgressBar(min = 0, max = nsim, style = 3)
+nsim <- 100
+replicates <- 10
+precip <- 1
+pb <- txtProgressBar(min = 0, max = replicates, style = 3)
 
-for(j in 1:10){
-soil <- raster(nrow = 1, ncol = 1) %>% setValues(100)
+for(j in 1:replicates){
 test <- population$households[[1]]
 for(i in 1:nsim){
-  this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * .5 # *.5 for fallow
-test <- test%>% 
+  #this.yield <- overlay(soil, precip, fun = yield) %>% getValues() * 0.5 # *.5 for fallow
+test <- test %>% 
+  allocate_land %>%
   farm %>%
   eat %>%
-  birth_death
+  birth_death %>%
+  fission
 
-soil <- soil + soil.dynamics(soil, nrow(test), 'reversible')
-sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), fertility = getValues(soil), replicate = j)
+sim.out <- add_row(sim.out, year = i, population = sum(test$n_inhabitants), fertility = mean(test$soil_fertility), replicate = j)
 }
 setTxtProgressBar(pb, j)
 
@@ -305,8 +353,6 @@ ggplot(sim.out, aes(year, population, group = replicate)) +
 ggplot(sim.out, aes(year, fertility, group = replicate)) +
   geom_line(alpha = .2) +
   theme_minimal()
-
-test
 ```
 
 # Environment
@@ -343,7 +389,7 @@ slope_dat <- as.data.frame(slope, xy = T, na.rm = T)
 grid.arrange(p1, p2, ncol = 2)
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-15-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-14-1.png)<!-- -->
 
 
 Where is arable land? Calculate the frequency of land with < 5 degree slope within 2.5 km.
@@ -372,7 +418,7 @@ prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
 gdd5_dat <- as.data.frame(gdd5, xy = T, na.rm = T)
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-16-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-15-1.png)<!-- -->
 Soils
 
 ```r
@@ -383,7 +429,7 @@ soils_dat <- as.data.frame(soils, xy =  T, na.rm = T) %>%
   mutate(type = as.factor(type))
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-18-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-17-1.png)<!-- -->
 
 
 Vegetation
@@ -409,7 +455,7 @@ pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover
                                `11` = 'Barren or sparse vegetation'))
 ```
 
-![](agroecology_files/figure-html/unnamed-chunk-19-1.png)<!-- -->
+![](agroecology_files/figure-html/unnamed-chunk-18-1.png)<!-- -->
 
 Let's put all these environmental rasters together in a single brick for easier access.
 
