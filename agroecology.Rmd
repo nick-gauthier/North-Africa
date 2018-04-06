@@ -19,6 +19,7 @@ library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
 library(gridExtra) # for arranging plots
 library(pbapply) # for progress bar and parallelization
+library(gdistance)
 ```
 
 # Modules
@@ -726,9 +727,83 @@ for(i in 1:nsim){
   }
 )
 ```
+
 ```{r}
 ggplot(test %>% unnest, aes(x,y)) +
 geom_point(aes(size = n_inhabitants)) +
     coord_quickmap()
+```
+
+```{r}
+```
+
+Functions for converting vegetation succession stage to woody biomass (per m2) and back again.
+```{r}
+vegetation_to_biomass <- function(vegetation){
+  ifelse(vegetation > 35, vegetation * 0.08066667 - 2.083333, 
+         ifelse(vegetation > 18, vegetation * 0.004705882 + 0.5752941, 
+                ifelse(vegetation > 7, vegetation * 0.05090909 - 0.2563636, 
+                       vegetation * 0.01428571)))
+}
+biomass_to_vegetation <- function(biomass){
+  ifelse(biomass > 0.74, biomass * 12.39669 + 25.82645, 
+         ifelse(biomass > 0.66, biomass * 212.5 - 122.25, 
+                ifelse(biomass > 0.1, biomass * 19.64286 + 5.035714, 
+                       biomass * 70)))
+}
+
+qplot(0:50, vegetation_to_biomass(0:50), geom = 'line') +
+  labs(title = 'Vegetation to biomass conversion', x = 'Vegetation succession stage', y = 'Biomass (kg/m2)') +
+  theme_minimal()
+```
+
+
+
+```{r}
+wood_req <- 1600 # yearly firewood requirement (kg) per person
+max_wood_gather_intensity <- 0.08 * 1e6 # maximum wood gathering intensity in kg/m2, converted to to kg/km2
+
+gather_wood <- function(settlements){
+  settlements %>%
+    mutate(pop = map_dbl(households, ~sum(.$n_inhabitants)),
+           available_biomass = vegetation_to_biomass(vegetation_stage) * vegetated_fraction * 1e6,  # the available biomass in the entire vegetated fraction of the cell
+           new_biomass = available_biomass - wood_req * pop ^ 0.8,
+           vegetation_stage = biomass_to_vegetation(new_biomass / (vegetated_fraction * 1e6))
+           ) %>%
+    select(-pop, -available_biomass, -new_biomass) %>%
+    mutate(vegetation_stage = pmin(vegetation_stage + 1, max_veg)) # regenerate one succession unit of vegetation a year, up to the maximum vegetation
+}
+```
+
+```{r}
+#this plot says that a population of less than 130 people can get their wood requirmenets from a fully vegetated 1km2 grid cell at the gathering intensity rate of 0.08 kg/m2. Above that population, right now people just extract more wood than they should ethnogrpahically. ideally at this threshold they would start gathering wood from naighboring patches.
+qplot(1:200, (wood_req * (1:200) ^ 0.8), geom= 'line') +
+  geom_hline(yintercept = max_wood_gather_intensity)
+```
+
+### LCPS
+```{r eval=FALSE, include=FALSE}
+altDiff <- function(x){x[2] - x[1]}
+hd <- transition(elevation, altDiff, 16, symm=FALSE)
+adj <- adjacent(elevation, cells=1:ncell(elevation), pairs=TRUE, directions=16)
+slope.c <- geoCorrection(hd, type = 'c')
+speed.c <- slope.c
+speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))
+Conductance.c <- geoCorrection(speed.c, type = 'c')
+rm(slope.c, speed.c, hd, adj)
+```
+
+```{r}
+test <- settlement_locations %>%
+  select(lon:lat) %>%
+  mutate(costs = map2(lon, lat, get_farming_catchment))
+
+get_farming_catchment <- function(x, y, conductance = Conductance.c){
+  accCost(conductance, c(x, y)) %>%
+    as.data.frame(xy = T, na.rm = T) %>%
+    rename(distance = layer) %>%
+    mutate(distance = distance / 3600) %>%
+    filter(distance <= .5)
+}
 ```
 
