@@ -40,7 +40,7 @@ rm(temp, t_warm, t_cold, alpha, gdd5)
 plot(modern_predictors)
 ```
 Import Modis PFT data
-```{r}
+```{r eval = F}
 #lpdaacLogin()
 MODISoptions(localArcPath = '~/MODIS/', outDirPath = 'Data/MODIS', dlmethod = 'wget', MODISserverOrder = 'LPDAAC', quiet = T)
 
@@ -48,12 +48,13 @@ pft <- runGdal('MCD12Q1', collection = '051', extent = bbox, SDSstring = "000010
 ```
 
 ```{r}
-pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover_Type_5.tif') %>%
+pft <- raster('data/MODIS/MCD12Q1.051_20180220150435/MCD12Q1.A2001001.Land_Cover_Type_5.tif') %>%
   projectRaster(crs = '+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0', method = 'ngb') %>%
   crop(bbox)
 names(pft) <- 'pft'
 
 modern_predictors <- projectRaster(modern_predictors, pft)
+plot(pft)
 plot(pft, modern_predictors)
 
 pft_dat <- pft %>%
@@ -83,19 +84,20 @@ dat <- brick(c(pft, modern_predictors)) %>%
   as.data.frame(xy = T, na.rm = T) %>%
   filter(!pft %in% c(0, 7:10)) %>%
   mutate(pft = recode_factor(as.factor(pft),
+                               `11` = 'Barren or sparse vegetation',
                                `1` = 'Evergreen Needleleaf trees',
                                `2` = 'Evergreen Broadleaf trees',
                                `3` = 'Deciduous Needleleaf trees',
                                `4` = 'Deciduous Broadleaf trees',
                                `5` = 'Shrub',
-                               `6` = 'Grass',
-                               `11` = 'Barren or sparse vegetation')) %>%
+                               `6` = 'Grass')) %>%
   mutate(pft_class = as.numeric(pft)) %>%
   mutate(pft_class = if_else(pft_class == 7, 0, pft_class))
 
-
-#sample_guide <- dat %>% group_by(pft) %>% count %>% mutate(n  = ifelse(n > 300000, 30000, n))
-#dat2 <- dat %>% nest(-pft) %>% left_join(sample_guide) %>% mutate(Sample = map2(data, n, sample_n)) %>% unnest(Sample)
+set.seed(1000)
+sample_guide <- dat %>% group_by(pft) %>% count %>% mutate(n  = ifelse(n > 10000, 10000, n))
+dat2 <- dat %>% nest(-pft) %>% left_join(sample_guide) %>% mutate(Sample = map2(data, n, sample_n)) %>% unnest(Sample) %>%
+  select(-pft, -n, -x, -y)
 ```
 
 ```{r}
@@ -106,89 +108,140 @@ mod <- gam(list(pft_class
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr'),
                  ~ s(alpha, bs = 'cr') + s(gdd5, bs = 'cr') + s(t_cold, bs = 'cr') + s(t_warm, bs = 'cr')), 
-           family = multinom(K = 6), method = 'REML', select = F, data = dat, optimizer = 'perf')
-
-saveRDS(mod, 'mod')
-mod2 <- readRDS('mod2')
-
-mod2 <- mod
-summary(mod2)
-plot(mod2, scale = 0)
-
-predictions <- predict(preds2, mod2, type = 'response', index = 1:9)
-names(predictions) <- dat2$megabiome %>% levels
-levelplot(predictions)
-
-biome.preds <- which.max(predictions) %>% as.data.frame(na.rm = T, xy = T)
-
-ggplot(biome.preds, aes(x, y)) + 
-  geom_tile(aes(fill = as.factor(layer))) + 
-  scale_fill_brewer(palette = 'Paired') + 
-  theme_void() + 
-  coord_fixed()
-mod2$aic
+           family = multinom(K = 6), method = 'REML', select = F, data = dat2)
+saveRDS(mod, 'mod_pft')
 ```
 
-
-Load a previously fitted gam model
 ```{r}
-veg_gam <- readRDS('mod2')
-mod_predictions <- predict(modern_predictors, veg_gam, type = 'response', index = 1:9)
+mod <- readRDS('mod_pft')
+plot(mod, scale = 0)
 
-rasterVis::levelplot(mod_predictions)
+predictions <- predict(modern_predictors, mod, type = 'response', index = 1:7)
+names(predictions) <- dat$pft %>% levels
+plot(predictions)
+```
 
-uncertainty <- mod_predictions %>% 
+```{r}
+uncertainty <- predictions %>% 
   as.data.frame(na.rm = T, xy = T) %>%
-  gather(var, val, 3:11) %>%
+  gather(var, val, 3:9) %>%
   group_by(x, y) %>%
   summarise(p1 = max(val), p2 = max(val[val != p1])) %>%
   mutate(ui = (p1 - p2) / p1)
 
-lc_mod <- mod_predictions%>% 
-  which.max %>% 
-  as.data.frame(na.rm = T, xy = T) %>% 
-  mutate(class = recode_factor(as.factor(layer),
-                               `6` = 'Temperate forest',
-                               `9` = 'Warm-temperate forest',
-                               `4` = 'Grassland and dry shrubland',
-                               `3` = 'Desert (vegetated)',
-                               `1` = 'Desert (bare)', .default = 'Temperate forest'  # there a a handful of pixels with other types not visibleonthe mapsscale, replace with temperate forest for clarity as these pixels all are found in these areas
-                           ))  %>%
-  left_join(uncertainty)
-
-
-
-lc_colors <- c('#016400', '#018200', '#97bf47','#dcce00',  '#fffbc3')
-
-ggplot(lc_mod, aes(x, y)) + 
-  geom_tile(aes(alpha = ui, fill = class)) + 
+which.max(predictions) %>% 
+  as.data.frame(na.rm = T, xy = T) %>%
+  mutate(pft = recode_factor(as.factor(layer),
+                              `2` = 'Evergreen Needleleaf trees',
+                              `3` = 'Evergreen Broadleaf trees',
+                              `4` = 'Deciduous Needleleaf trees',
+                              `5` = 'Deciduous Broadleaf trees',
+                              `6` = 'Shrub',
+                              `7` = 'Grass',
+                             `1` = 'Barren or sparse vegetation')) %>%
+  left_join(uncertainty) %>%
+ggplot(aes(x, y)) + 
+  geom_tile(aes(fill = pft, alpha = ui)) + 
   scale_fill_manual(values = lc_colors) + 
   theme_void() + 
   coord_fixed()
 ```
 
+```{r}
+get_last2k <- function(x){
+  brick(x) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  projectRaster(temp) %>%
+  crop(bbox) %>%
+  mask(temp) %>% 
+  stackApply(rep(1:12, 100), mean)
+}
+```
+
+```{r}
+temp <- brick('data/CHELSA/temp_1km.tif') 
+tmin <- brick('data/CHELSA/tmin_1km.tif')
+tmax <- brick('data/CHELSA/tmax_1km.tif')
+
+temp_200 <- get_last2k('data/CCSM4/trans1-850AD.cam.h0.TREFHT.010001-019912.nc') - 273.15
+gc()
+temp_2000 <- get_last2k('data/CCSM4/trans1-850AD.cam.h0.TREFHT.190001-199912.nc') - 273.15
+gc()
+
+tmin_200 <- get_last2k('data/CCSM4/trans1-850AD.cam.h0.TREFHTMN.010001-019912.nc') - 273.15
+gc()
+
+tmin_2000 <- get_last2k('data/CCSM4/trans1-850AD.cam.h0.TREFHTMN.190001-199912.nc') - 273.15
+gc()
+
+tmax_200 <- get_last2k('data/CCSM4/trans1-850AD.cam.h0.TREFHTMX.010001-019912.nc') - 273.15
+gc()
+
+tmax_2000 <- get_last2k('data/CCSM4/trans1-850AD.cam.h0.TREFHTMX.190001-199912.nc') - 273.15
+gc()
+
+
+temp_200_1km <- temp + temp_200 - temp_2000
+tmin_200_1km <- tmin + tmin_200 - tmin_2000
+tmax_200_1km <- tmax + tmax_200 - tmax_2000
+
+writeRaster(temp_200_1km, 'data/CCSM4/temp_200_1km.tif', overwrite = T)
+writeRaster(tmin_200_1km, 'data/CCSM4/tmin_200_1km.tif', overwrite = T)
+writeRaster(tmax_200_1km, 'data/CCSM4/tmax_200_1km.tif', overwrite = T)
+```
+
+```{r}
+prec <- brick('data/CHELSA/prec_1km.tif') 
+prec_200 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.010001-019912.nc') + brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.010001-019912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:12, 100), mean)
+gc()
+
+prec_2000 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.190001-199912.nc') + brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.190001-199912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:12, 100), mean)
+gc()
+
+prec_200_1km <- prec * prec_200 / prec_2000
+writeRaster(prec_200_1km, 'data/CCSM4/prec_200_1km.tif', overwrite = T)
+```
+
 
 Now do the same for the mid holocene
 ```{r}
-tmin <- brick('~/gdrive/Projects/MedinesR/Downscaled/ensemble_tmn_mh6k.tif') %>% crop(bbox)
-tmax <- brick('~/gdrive/Projects/MedinesR/Downscaled/ensemble_tmx_mh6k.tif') %>% crop(bbox)
-prec <- brick('~/gdrive/Projects/MedinesR/Downscaled/ensemble_prc_mh6k.tif') %>% crop(bbox)
+temp <- brick('data/CCSM4/temp_200_1km.tif')
+tmin <- brick('data/CCSM4/tmin_200_1km.tif')
+tmax <- brick('data/CCSM4/tmax_200_1km.tif')
+prec <- brick('data/CCSM4/prec_200_1km.tif')
 
 srad <- list.files('~/Downloads/CGIAR PET/ET_SolRad', full.names = T) %>%
   stack %>%
   crop(bbox) %>%
   raster::resample(prec) %>%
   crop(bbox) %>%
+  mask(prec) %>%
   .[[c(1,5:12, 2:4)]] %>%
   `*`(2.45) #convert to mj/m2/day
 
+library(SPEI)
 pet <- hargreaves(tmin %>% getValues %>% t, 
                   tmax %>% getValues %>% t, 
                   Ra = srad %>% getValues %>% t, 
                   Pre = prec %>% getValues %>% t, na.rm = T) %>%
   t %>%
   setValues(tmin, .)
-
+writeRaster(pet, 'data/CCSM4/pet_200_1km.tif')
 swc <- setValues(pet[[1]], 100) %>% mask(pet[[1]])
 aet.brick <- setValues(pet, 0) %>% mask(pet[[1]])
 
@@ -203,8 +256,8 @@ for(a in 1:10){
 }
 
 alpha <- sum(aet.brick) / sum(pet)
+writeRaster(alpha, 'data/CCSM4/alpha_200_1km.tif')
 
-temp <- (tmax + tmin) / 2
 t_warm <- max(temp)
 t_cold <- min(temp)
 
@@ -222,33 +275,115 @@ doy <-c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349)
 beginCluster(4)
 gdd5 <- clusterR(temp, calc, args = list(fun = gdd5_interp), export = 'doy')
 endCluster()
+writeRaster(gdd5, 'data/CCSM4/gdd5_200_1km.tif', overwrite = T)
 
-mh_predictors <- brick(c(t_warm, t_cold, alpha,gdd5))
-names(mh_predictors) <- c('t_warm', 't_cold', 'alpha', 'gdd5')
+
+ad200_predictors <- brick(c(t_warm, t_cold, alpha,gdd5))
+names(ad200_predictors) <- c('t_warm', 't_cold', 'alpha', 'gdd5')
 rm(prec, tmin, tmax, pet, ksoil, aet, aet.brick, swc.tmp, swc, temp, t_warm, t_cold, alpha, gdd5)
 
-plot(mh_predictors)
+plot(ad200_predictors)
+plot(projectRaster(ad200_predictors,modern_predictors) - modern_predictors)
 ```
 
 ```{r}
-lc_mh <- predict(mh_predictors, veg_gam, type = 'response', index = 1:9) %>% 
+ad200_predictors %>%
+  projectRaster(modern_predictors) %>%
+predict(mod, type = 'response', index = 1:7) %>% 
+  .[[2:5]] %>%
+  sum %>%
+  plot
+
+predictions %>%
+  .[[2:5]] %>%
+  sum %>% plot
+
+library(viridis)
+ad200_predictors %>%
+  projectRaster(modern_predictors) %>%
+predict(mod, type = 'response', index = 1:7) %>% 
+  .[[2:5]] %>%
+  sum %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x, y)) +
+  geom_raster(aes(fill = layer)) +
+  #scale_fill_distiller(palette = 'YlGn', direction = 1, guide = 'legend', limits = c(0,1),breaks = c(0,.5,1)) +
+  scale_fill_viridis(name = 'Probability of \noccurrence', guide = 'legend', limits = c(0,1),breaks = c(0,.5,1)) +
+    theme_void() + 
+  coord_quickmap() +
+  labs(title = 'Estimated forest cover, 200 CE', subtitle = 'Potential natural vegetation, at equilibrium with climate')
+
+ggsave('forest_cover.png')
+
+Now import temperature and precipitation data.
+```
+
+```{r climate}
+prec <- brick('data/CCSM4/prec_200_1km.tif') %>% sum 
+gdd5 <- raster('data/CCSM4/gdd5_200_1km.tif')
+
+prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
+gdd5_dat <- as.data.frame(gdd5, xy = T, na.rm = T)
+```
+
+```{r echo = F}
+p1 <- ggplot(prec_dat, aes(x, y)) +
+  geom_raster(aes(fill = layer)) +
+  scale_fill_distiller(name = 'Millimeters', palette = 'YlGnBu', direction = 1, guide = 'legend', breaks = c(250, 500, 750, 1000)) +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Annual Precipitation') +
+  theme(legend.position='bottom')
+
+p2 <- ggplot(gdd5_dat, aes(x, y)) +
+  geom_raster(aes(fill = gdd5_200_1km)) +
+  scale_fill_distiller(name = 'Degree Days', palette = 'YlOrRd', direction = 1, guide = 'legend') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Growing Degree Days') +
+  theme(legend.position='bottom')
+
+
+p1
+ggsave('ce200_prec.png')
+p2
+ggsave('ce200_gdd.png')
+```
+
+```{r}
+ad200_lc_preds <- ad200_predictors %>%
+  projectRaster(modern_predictors) %>%
+predict(mod, type = 'response', index = 1:7)
+
+ad200_lc_preds%>% 
+  .[[2:5]] %>%
+  sum %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x, y)) +
+  geom_raster(aes(fill = layer)) +
+  scale_fill_distiller(palette = 'Greens', direction = 1) +
+    theme_void() + 
+  coord_fixed()
+```
+
+```{r}
+plot(ad200_lc_preds)
+brick(sum(ad200_lc_preds[[2:5]]), ad200_lc_preds[[c(1,6,7)]]) %>%
   which.max %>% 
   as.data.frame(na.rm = T, xy = T) %>% 
-  mutate(class = recode_factor(as.factor(layer),
-                               `6` = 'Temperate forest',
-                               `9` = 'Warm-temperate forest',
-                               `4` = 'Grassland and dry shrubland',
-                               `3` = 'Desert (vegetated)',
-                               `1` = 'Desert (bare)', .default = 'Temperate forest'  # there are a handful of pixels with other types not visibleonthe mapsscale, replace with temperate forest for clarity as these pixels all are found in these areas
-                           ))
-
-lc_colors <- c('#016400', '#018200', '#97bf47','#dcce00',  '#fffbc3')
-
-ggplot(lc_mh, aes(x, y)) + 
-  geom_tile(aes(fill = class)) + 
-  scale_fill_manual(values = lc_colors) + 
+ mutate(pft = recode_factor(as.factor(layer),
+                            `1` = 'Forest',
+                              `3` = 'Shrub',
+                              `4` = 'Grass',
+                              `2` = 'Barren'
+                             )) %>%
+ggplot(aes(x, y)) + 
+  geom_tile(aes(fill = pft)) + 
+  scale_fill_manual(values = c('#008000' ,'#99CC00', '#99FF99', '#FFCC99') ) + 
   theme_void() + 
   coord_fixed()
+
+agriculture_color <- "#FF9900"
 ```
 
 
