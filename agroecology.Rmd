@@ -417,28 +417,27 @@ fission <- function(households){
 Start with the populaiton level parameters, i.e. how many settlements, households, and individuals to start the simulation with.
 
 ```{r pop_params}
-init_settlements <- 1 
-init_households <- 5
-init_inhabitants <- 3
-```
-
-Create a 2 villages of 10 households with 6 people in each.
-```{r}
 create.households <- function(x){
   tibble(household = 1:x,
          n_inhabitants = init_inhabitants,
          storage = n_inhabitants * wheat.req,
-         #yield_memory = c(max.yield),
-         land = 5,
+         yield_memory = max.yield,#list(rep(max.yield, memory_length)),
+         land = calc_land_req(n_inhabitants, peak_end(yield_memory)),
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
-           laborers = map_dbl(inhabitants, ~filter(.x, age >= 20 & age < 45) %>% nrow)) #%>%
-    #mutate(soil_fertility = 100)
+           laborers = map_dbl(inhabitants, ~filter(.x, age >= 15 & age < 65) %>% nrow))
 }
 
 create.inhabitants <- function(x){
   tibble(age = round(runif(x, 1, 60)))
 }
+```
+
+Create a 2 villages of 10 households with 6 people in each.
+```{r}
+init_settlements <- 1 
+init_households <- 1
+init_inhabitants <- 5
 
 population <- tibble(settlement = 1:init_settlements,
                      x = 1, y = 1,
@@ -449,51 +448,59 @@ population <- tibble(settlement = 1:init_settlements,
 Make an environment data table. For now we'll keep it to dummy value for development and testing purposes, see the following section for a "real environment".
 
 ```{r}
-environment <- tibble(x = 1, y = 1, arable_prop = 1, precipitation = 1)
+environment <- tibble(x = 1, y = 1, area = 1, arable_proportion = 1, precipitation = 1, vegetated_fraction = 1, vegetation_stage = 50)
 ```
 
 ```{r}
 # this function takes a settlement (tibble of households), and makes the households do stuff
-household_dynamics <- function(settlement, arable_prop, yield){
-  settlement %>%
-    allocate_land(arable_prop) %>%
-    farm(yield) %>%
+household_dynamics <- function(settlements){
+  unnest(settlements) %>%
+    allocate_land %>%
+    farm %>%
     eat %>%
-    birth_death #%>%
-    #fission)
+    birth_death %>%
+    nest(household:last(everything()), .key = households)
 }
 
 # this function takes the master dataframe and calculates the per patch climatic yields from per patch precipitation
-environmental_dynamics <- function(population){
-  population %>%
+environmental_dynamics <- function(settlements){
+  settlements %>%
     mutate(climatic_yield = calc_climatic_yield(precipitation))
 }
 ```
 
 Calculate population totals for plotting
 ```{r}
-calc_pop <- function(population){
-  population %>% 
+calc_pop <- function(settlements){
+  settlements %>% 
     unnest(households) %>%
     .$n_inhabitants %>%
     sum
 }
+calc_food <- function(settlements){
+  settlements %>%
+    unnest(households) %>%
+    .$food_ratio %>%
+    mean
+}
 ```
 
+
 ```{r simulation}
-nsim <- 750
-replicates <- 8
+nsim <- 400
+replicates <- 4
 
 sim.out <- pblapply(1:replicates, cl = 4, function(j){
-  test <- population %>% left_join(environment)
-  sim.out.tmp <- tibble(year = rep(0, nsim + 1), population = c(calc_pop(population), rep(0, nsim)), replicate = j)
+  test <- population %>% left_join(environment, by = c('x', 'y'))
+  sim.out.tmp <- tibble(year = rep(0, nsim + 1), population = c(calc_pop(population), rep(0, nsim)), food_ratio = 1, replicate = j)
   for(i in 1:nsim){
+        sim.out.tmp[i + 1,] <- c(i, 0, 0, j)
     if(nrow(test %>% unnest) > 0){
+          sim.out.tmp[i + 1,] <- c(i, calc_pop(test), calc_food(test), j)
   test <- test %>% 
     environmental_dynamics %>%
-    mutate(households = pmap(list(households, arable_prop, climatic_yield), household_dynamics))
-    }
-    sim.out.tmp[i + 1,] <- c(i, calc_pop(test), j)
+    household_dynamics
+  }
   }
   return(sim.out.tmp)
 }) %>% bind_rows
@@ -502,12 +509,24 @@ sim.out <- pblapply(1:replicates, cl = 4, function(j){
 ```{r sim-plots}
 ggplot(sim.out, aes(year, population, group = replicate)) +
   geom_smooth(aes(color = as.factor(replicate))) +
-  #geom_line(alpha = .1) +
+  geom_line(alpha = .1) +
   theme_minimal()
 
+ggplot(sim.out, aes(year, food_ratio, group = replicate)) +
+  geom_smooth(aes(color = as.factor(replicate))) +
+  geom_line(alpha = .1) +
+  theme_minimal()
+```
+
+```{r}
 sim.out %>%
   filter(year == nsim) %>%
   ggplot(aes(x = population)) +
+  geom_density() +
+  theme_minimal()
+sim.out %>%
+  filter(year == nsim) %>%
+  ggplot(aes(x = food_ratio)) +
   geom_density() +
   theme_minimal()
 ```
