@@ -538,24 +538,13 @@ sim.out %>%
 Set a bounding box for the study area.
 ```{r bbox}
 bbox <- extent(5, 11.5, 34, 37.5)
-```
-
-Import SRTM GDEM data for the elevation basemap.
-```{r elevation}
 elevation <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
 ```
 
-```{r echo = F}
-elev_dat <- as.data.frame(elevation, xy =  T, na.rm = T) %>%
-  rename(elevation = SRTM_1km)
-
-p1 <- ggplot(elev_dat, aes(x, y)) +
-  geom_raster(aes(fill = elevation)) +
-  scale_fill_gradientn(colours = terrain.colors(10), name = 'Meters', guide = 'legend', breaks = seq(500,2000,500)) +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Elevation') +
-  theme(legend.position='bottom')
+```{r climate}
+prec <- brick('data/CHELSA/prec_1km.tif') %>% 
+  sum %>%
+  projectRaster(elevation)
 ```
 
 Calculate slope in degrees from 90m SRTM elevation (90m data from http://www.earthenv.org/DEM).
@@ -569,143 +558,27 @@ slope <- do.call(mosaic, elev.list) %>%
   terrain(opt = 'slope', unit = 'degrees')
 ```
 
-```{r echo = F}
-p2 <-  aggregate(slope, fact = 10, fun = median) %>%
-  mask(elevation) %>%
-  as.data.frame(xy = T, na.rm = T) %>%
-  ggplot(aes(x, y)) +
-  geom_raster(aes(fill = slope)) +
-  scale_fill_viridis(name = 'Degrees', option = 'B', guide = 'legend') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Slope') +
-  theme(legend.position='bottom')
-
-grid.arrange(p1, p2, ncol = 2)
-```
-
-
 Where is the arable land? Calculate the proportion of land with =< 5 degree slope. Also find land with slope between 5 and 15 degrees, as potential land for terracing.
 ```{r arable_land}
 arable_proportion <- (slope <= 5) %>% 
   aggregate(fact = 10, fun = sum) %>% 
   mask(elevation) %>%
   `/`(100)
-
-terraceable_proportion <- (slope > 5 & slope <= 15) %>% 
-  aggregate(fact = 10, fun = sum) %>% 
-  mask(elevation) %>%
-  `/`(100)
 ```
 
-```{r echo = F}
-p1 <- as.data.frame(arable_proportion, xy = T, na.rm = T) %>%
-  ggplot(aes(x, y)) +
-  geom_raster(aes(fill = layer)) +
-  scale_fill_viridis(name = 'Proportion of\n arable land') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Arable land')
 
-p2 <- as.data.frame(terraceable_proportion, xy = T, na.rm = T) %>%
-  ggplot(aes(x, y)) +
-  geom_raster(aes(fill = layer)) +
-  scale_fill_viridis(name = 'Proportion of land\n suitable for terracing') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Terrace-able land')
-
-grid.arrange(p1, p2, ncol = 2)
-```
-
-Now import temperature and precipitation data.
-```{r climate}
-prec <- brick('data/CHELSA/prec_1km.tif') %>% sum %>% projectRaster(elevation)
-gdd5 <- raster('data/CHELSA/gdd5_1km.tif')
-
-prec_dat <- as.data.frame(prec, xy = T, na.rm = T)
-gdd5_dat <- as.data.frame(gdd5, xy = T, na.rm = T)
-```
-
-```{r echo = F}
-p1 <- ggplot(prec_dat, aes(x, y)) +
-  geom_raster(aes(fill = layer)) +
-  scale_fill_distiller(name = 'Millimeters', palette = 'YlGnBu', direction = 1, guide = 'legend', breaks = c(250, 500, 750, 1000)) +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Annual Precipitation') +
-  theme(legend.position='bottom')
-
-p2 <- ggplot(gdd5_dat, aes(x, y)) +
-  geom_raster(aes(fill = gdd5_1km)) +
-  scale_fill_distiller(name = 'Degree Days', palette = 'YlOrRd', direction = 1, guide = 'legend') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Growing Degree Days') +
-  theme(legend.position='bottom')
-
-grid.arrange(p1, p2, ncol = 2)
-```
-Soils
+Get the area of each grid cell, in km2.
 ```{r}
-soils <- merge(raster('data/soils/TAXNWRB_1km_Tunisia.tiff') %>% crop(bbox),
-               raster('data/soils/TAXNWRB_1km_Algeria.tiff') %>% crop(bbox), tolerance = .3)
-soils_dat <- as.data.frame(soils, xy =  T, na.rm = T) %>%
-  rename(type = layer) %>%
-  mutate(type = as.factor(type))
-```
-
-```{r echo = F}
-ggplot(soils_dat, aes(x, y)) +
-  geom_raster(aes(fill = type)) +
-  scale_fill_discrete(name = 'Soil type') +
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Soils')
-```
-
-
-Vegetation
-```{r vegetation}
-pft <- raster('data/MODIS/MCD12Q1.051_20170918110118/MCD12Q1.A2001001.Land_Cover_Type_5.tif') %>%
-  projectRaster(disaggregate(elevation, 2), method = 'ngb') %>%
-  as.data.frame(xy = T, na.rm = T) %>%
-    rename(pft = MCD12Q1.A2001001.Land_Cover_Type_5) %>%
-  #filter(!pft %in% c(0, 7:10)) %>%
-  mutate(pft = recode_factor(as.factor(pft),
-                               `0` = 'Water',
-                               `1` = 'Evergreen Needleleaf trees',
-                               `2` = 'Evergreen Broadleaf trees',
-                               `3` = 'Deciduous Needleleaf trees',
-                               `4` = 'Deciduous Broadleaf trees',
-                               `5` = 'Shrub',
-                               `6` = 'Grass',
-                               `7` = 'Cereal crops',
-                               `8` = 'Broad-leaf crops',
-                               `9` = 'Urban and built-up',
-                               `10` =	'Snow and ice',
-                               `11` = 'Barren or sparse vegetation'))
-```
-
-```{r echo = F}
-lc_colors <- c('#000080', '#008000', '#00FF00', '#99CC00', '#99FF99', '#FFCC99', '#FF9900', '#FFFF00', '#999966', '#FF0000', '#FFFFFF', '#808080') 
-
-# colors inspired by https://lpdaac.usgs.gov/about/news_archive/modisterra_land_cover_types_yearly_l3_global_005deg_cmg_mod12c1
-ggplot(pft, aes(x, y)) + 
-  geom_tile(aes(fill = pft)) + 
-  scale_fill_manual(values = lc_colors) + 
-  theme_void() +
-  coord_quickmap() +
-  labs(title = 'Vegetation distribution')
+area <- area(elevation)
 ```
 
 Let's put all these environmental rasters together in a single brick for easier access.
 ```{r}
-environment <- brick(arable_proportion, prec) %>%
+environment <- brick(arable_proportion, prec, area) %>%
   as.data.frame(na.rm = T, xy = T, centroids = T) %>%
   as_tibble %>%
   remove_rownames %>%
-  rename(arable_prop = layer.1, precipitation = layer.2) %>%
+  rename(arable_proportion = layer.1, precipitation = layer.2, area = layer.3) %>%
   mutate(precipitation = precipitation / 1000,
          x = round(x, 6), y = round(y, 6))
 environment
@@ -713,8 +586,6 @@ environment
  
  Now import archaeological data
 ```{r}
-library(pleiades)
-
 settlement_locations <- pl_search_places() %>%
   filter(locationPrecision == 'precise') %>%
   select(title, type = featureTypes, description, 
@@ -733,28 +604,35 @@ ggplot(settlement_locations, aes(lon, lat)) +
   coord_fixed() +
   theme_void()
 ```
+
 ```{r}
 init_households <- 1
 init_inhabitants <- 4
 
 population <- settlement_locations %>%
   select(lon:lat) %>%                        # get the x and y coordinates of settlements
-  rasterize(elevation, fun = 'count') %>%    # create a raster representing the count of settlements in each cell
-  mask(elevation) %>%
+  rasterize(prec, fun = 'count') %>%    # create a raster representing the count of settlements in each cell
+  mask(prec) %>%
   as.data.frame(xy = T, na.rm = T, centroids = T) %>%
   remove_rownames %>%
   as.tibble %>%
-  mutate(x = round(x, 6), y = round(y, 6)) %>%   # the coordinates here and in the environment raster look the same, but need to be rounded to correct for floating point inequality issues
+  mutate(settlement = 1:n(), x = round(x, 6), y = round(y, 6)) %>%   # the coordinates here and in the environment raster need to be rounded to correct for floating point inequality issues
   select(-layer) %>%
   mutate(households = init_households,
          households = map(households, create.households))
 ```
 
 ```{r}
-nsim <- 200
+nsim <- 400
+
+test <- left_join(population, environment) %>%
+  filter(!is.na(precipitation)) %>%
+  filter(arable_proportion > 0)
+test %>% 
+  mutate(groups = rep(1:3, length.out = nrow(.))) %>%
+  split(.$groups)
 
 
-test <- left_join(population, environment)
 system.time(
 for(i in 1:nsim){
   test <- test %>% 
