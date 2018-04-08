@@ -168,52 +168,73 @@ grid.arrange(p1, p2, ncol = 2)
 ```
 
 How agents decide the amount of land they need to farm. The determination of how much land is needed is a function of the household's occupants and labor availability.
-```{r land_req}
-land.req <- function(population, yield, laborers, fallow = T){
-  land <- wheat.req * population * (1 + seed_proportion) / yield * ifelse(fallow, 2, 1)
-  pmin(land, max.ag.labor * laborers * ifelse(fallow, 2, 1) / labor.per.hectare) # constrain by maximum hectares per household 
+```{r}
+calc_land_req <- function(n_inhabitants, yield, fallow = T){
+  wheat.req * n_inhabitants * (1 + seed_proportion) / yield * ifelse(fallow, 2, 1)
 }
 ```
 
 ```{r echo=F}
-bind_rows(tibble(n = 1:20, land = land.req(n, max.yield, 3, fallow = F), Management = 'No Fallow'),
-          tibble(n = 1:20, land = land.req(n, max.yield, 3, fallow = T), Management = 'Fallow')) %>%
-ggplot(aes(n, land, color = Management)) +
+expand.grid(n_inhabitants = 1:20, Management = c('Fallow', 'No Fallow')) %>%
+  mutate(land = if_else(Management == 'Fallow', calc_land_req(n_inhabitants, max.yield, fallow = T), 
+                                                calc_land_req(n_inhabitants, max.yield, fallow = F))) %>%
+ggplot(aes(n_inhabitants, land, color = Management)) +
   geom_line() + 
-  labs(title = 'Household size and land requirements', subtitle = 'Assuming yield of 2,000 kg/ha', 
+  labs(title = 'Household size and land requirements', subtitle = 'Assuming yield of 1,500 kg/ha', 
        x = 'Household Size (inhabitants)', y = 'Farm land requirement (ha)') +
   theme_minimal()
 ```
+
+```{r land_req}
+max_cultivable_land <- function(laborers, available_area, fallow = T, type = 'asymptote'){
+  potential_area <- max.ag.labor * laborers * ifelse(fallow, 2, 1) / labor.per.hectare
+  if(type == 'unlimited') return(potential_area)
+  if(type == 'step') return(pmin(available_area, potential_area))
+  if(type == 'asymptote') return(available_area * (1 - exp(-potential_area / available_area)))
+}
+```
+
+```{r echo = F}
+tibble(laborers = seq(0,30,.1), 
+       potential = max_cultivable_land(laborers, 100, type = 'unlimited'),
+       Step = max_cultivable_land(laborers, 100, type = 'step'), 
+       Asymptote = max_cultivable_land(laborers, 100, type = 'asymptote')) %>%
+  gather(Function, value, 3:4) %>% 
+  ggplot(aes(potential, value, color = Function)) +
+  geom_line() +
+  labs(title = 'Space limited cultivation', subtitle = 'Adapted from Puleston and Tuljapurkar (2008)', x = 'Potential area cultivated by laborers (ha)', y = 'Cultivated area (ha)') +
+  theme_minimal()
+```
+
+
 
 Here households calculate how much land they need, pull the crop yield from the environment, remember the yield, and determine their harvests by multiplying the yield by the amount of land they have (also removing some of the crop to save as seed for next year).
 
 first, for dev purposes, make a fake environment raster.
 ```{r}
-allocate_land <- function(households, arable_proportion){
+allocate_land <- function(households){
   households %>% 
-   mutate(land_req = 5, #land.req(n_inhabitants, peak_end(yield_memory), laborers),
-          total_land_req = sum(land_req),
-          land = if_else(total_land_req < (arable_proportion * 100), land_req, land_req / total_land_req * arable_proportion * 100)) %>%
-    select(-land_req, -total_land_req)
+   mutate(land = calc_land_req(n_inhabitants, peak_end(yield_memory)),
+          max_land = max_cultivable_land(laborers, area * arable_proportion * 100, fallow = T, type = 'asymptote')) %>%
+    mutate(land = pmin(land, max_land)) %>%
+    select(-max_land)
 }
 ```
 
 ```{r farm_funs}
 farm <- function(households){
   households %>%
-    mutate(yield = climatic_yield * .5, #calc_yield_reduction(soil_fertility, climatic_yield) * 0.5,
-           #yield_memory = map2(.data$yield_memory, .data$yield, remember),
-           harvest = land * yield - land * sowing_rate) %>% select(-yield)#,
-           #soil_fertility = 100)#soil_fertility + soil.dynamics(soil_fertility, laborers, 'reversible'))
+    mutate(yield = climatic_yield,
+           yield_memory = yield, #map2(yield_memory, yield, remember),
+           harvest = land * yield * .5 - land * sowing_rate) #%>%  # *.5 is for fallow
+    #select(-yield)
 }
 ```
 
 ```{r remember}
 remember <- function(yield_memory, yield){
-  yield_memory <- rnorm(1, yield, yield * 0.0333) %>%  #memory is fuzzy
-    c(yield_memory)
-  if(length(yield_memory) > max.memory) yield_memory <- yield_memory[1:max.memory]
-  return(yield_memory)
+ # rnorm(1, yield, yield * 0.0333) %>%  #memory is fuzzy
+    append(yield_memory[-length(yield_memory)], yield, after = 0) # remove the last entry in the vector and add new yield to the begining
 }
 ```
 
