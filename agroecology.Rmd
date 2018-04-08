@@ -13,11 +13,9 @@ knitr::opts_chunk$set(echo = T)
 Import necessary packages
 ```{r libraries, message = F, warning = F}
 library(raster)  # for raster manipulation
-library(MODIS) # land cover data
 library(tidyverse) # for data manipulation and plotting
 library(mgcv) # for fitting functions to data
 library(viridis) # for color palettes
-library(gridExtra) # for arranging plots
 library(pbapply) # for progress bar and parallelization
 library(pleiades)
 library(gdistance)
@@ -59,55 +57,57 @@ expand.grid(fertility = 0:100, population = 0:5, soil.type = degradation$type, s
 ```
 ### Time Allocation
 ```{r}
-
-allocate_time <- function(p = 1, b = 1, lf, j = 0.3, q = 0, r = 1, k = 0.4, a = 1, w = 0.2, le = 1 - lf){
+calc_utility <- function(p = 1, b = 1, lf, lm = 1 - lf, j = 0.2, r = 1, k = 0.6, a = 1, w = 0){
+  le <- 1 - lf - lm
+  q <- infrastructure_quality(lm)
   p * b * lf ^ j * (q + r) ^ k * a ^ (1 - j - k) + w * le
 }
+```
 
-expand.grid(lf = seq(0,1,.01), q = seq(0,1,.01), r = c(.1, .5, 1)) %>%
-  mutate(utility = pmap_dbl(list(lf = lf, q = q, r = r), allocate_time)) %>%
-  ggplot(aes(lf, utility, group = q, color  = q)) +
+```{r}
+expand.grid(b = max_yield, lf = seq(0,1,.01), r = 1:10, a = 30) %>%
+  mutate(utility = calc_utility(b = b, lf = lf, r = r, a = a)) %>%
+  ggplot(aes(lf, utility, color = r, group = r)) +
   geom_line() +
-  facet_wrap(~as.factor(r)) +
   theme_minimal()
 ```
 
 ```{r}
-p = 1
-b = 1
-j = 0.3
-q = 0
-r = 1
-k = 0.4
-a = 1
-w = 0.2
-l <- 1
-psi <- .2
-e <- .125
-qmax <- 1
-#region 1
-(j * p * b * a ^ (1-j-k) * r ^ k / w) ^ (1/(1-j))
+tibble(rain = seq(.14, 1, .01), linear = rain, power = rain^.6, log = 0.51 * log(rain) + 1.03) %>%
+  gather(key, value, linear:log) %>%
+  ggplot(aes(rain, value, group = key, color = key)) +
+  geom_line()
 
-#region 2
-1 / (j + k) * (k * l + j * (psi - e) - 2 * j * e * r / qmax)
 
-#region 3
-psi - e
+tibble(area = seq(0,1,.01), linear = area, power = area^.2, asymptote = (1 - exp(-area / 1))) %>%
+  gather(key, value, linear:asymptote) %>%
+  ggplot(aes(area, value, group = key, color = key)) +
+  geom_line()
+```
 
-######
-allocate_time <- function(p = 1, b = 1, j = 0.3, r = 1, k = 0.4, a = 1){
-
+```{r}
+allocate_time <- function(l = 1, j = 0.2, r = 1, k = 0.6, psi = 0.2, e = 0.18, s = 1){
+  #qmax <- s * r
+  #region 2
+  #(1 / (j + k)) * (k * l + j * (psi - e) - 2 * j * e * r / qmax)
+  #region 3
+  household %>%
+    mutate(farming_labor = 1 - psi - e)
+  #psi + e
 }
 ```
 
 ```{r}
-maintain_infra <- function(lm, psi = .2, epsilon = .18, imax = 1){
+infrastructure_quality <- function(lm, psi = .2, epsilon = .18, imax = 1){
   ifelse(0 <= lm & lm < (psi - epsilon), 0,
   ifelse((psi - epsilon) <= lm & lm <= (psi + epsilon), imax / (2 * epsilon) * (lm - psi + epsilon), imax))
 }
+```
+
+```{r}
 psi = .2; epsilon = .18
-tibble(lf = seq(0, 1, .001), i = maintain_infra(lf)) %>%
-  ggplot(aes(lf, i)) +
+tibble(lm = seq(0, 1, .001), i = infrastructure_quality(lm)) %>%
+  ggplot(aes(lm, i)) +
     geom_vline(xintercept = psi + epsilon, linetype = 2, color = 'grey') +
   geom_line() +
   labs(title = 'Impact of infrastructure maintainance on performance',
@@ -121,7 +121,7 @@ Agents determine how much land they need, calculate the yields from their land, 
 
 First define some parameters relating to food production and consumption.
 ```{r food_params}
-max.yield <- 1000 # maximum possible wheat yield, in kg/ha, should range from 1000 - 2000
+max_yield <- 1000 # maximum possible wheat yield, in kg/ha, should range from 1000 - 2000
 
 calorie.req <- 2582 * 365  # annual individual calorie requirement, derived from daily requirement
 wheat.calories <- 3320 # calories in a kg of wheat
@@ -129,17 +129,18 @@ wheat.cal.proportion <- 1 # percent of individual's food calories coming from wh
 wheat.req <- calorie.req / wheat.calories * wheat.cal.proportion # kg of wheat to feed a person for 1 year
 
 sowing_rate <- 135  # kg of wheat to sow a hectare (range 108 - 135 from Roman agronomists)
-seed_proportion <- 135 / max.yield # proportion of harvest to save as seed for next year's sowing
+seed_proportion <- 135 / max_yield # proportion of harvest to save as seed for next year's sowing
 
 labor.per.hectare <- 40 # person days per hectare
-max.ag.labor <- 280 # maximum days per year an individual can devote to farming
+max_labor <- 280 # maximum days per year an individual can devote to farming
 memory_length <- 10 #  number of years a household remembers
+labor_elasticity <- 0.2
 ```
 
 Crop yields are determined by rainfall and soil fertility.
 ```{r yields}
 calc_climatic_yield <- function(precipitation){
-  max.yield * pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
+  max_yield * pmax(0, 0.51 * log(precipitation) + 1.03)  # annual precipitation impact on yields
 }
 
 calc_yield_reduction <- function(fertility, climate_yield){
@@ -178,8 +179,8 @@ calc_land_req <- function(n_inhabitants, yield, fallow = T){
 
 ```{r echo=F}
 expand.grid(n_inhabitants = 1:20, Management = c('Fallow', 'No Fallow')) %>%
-  mutate(land = if_else(Management == 'Fallow', calc_land_req(n_inhabitants, max.yield, fallow = T), 
-                                                calc_land_req(n_inhabitants, max.yield, fallow = F))) %>%
+  mutate(land = if_else(Management == 'Fallow', calc_land_req(n_inhabitants, max_yield, fallow = T), 
+                                                calc_land_req(n_inhabitants, max_yield, fallow = F))) %>%
 ggplot(aes(n_inhabitants, land, color = Management)) +
   geom_line() + 
   labs(title = 'Household size and land requirements', subtitle = 'Assuming yield of 1,500 kg/ha', 
@@ -188,8 +189,8 @@ ggplot(aes(n_inhabitants, land, color = Management)) +
 ```
 
 ```{r land_req}
-max_cultivable_land <- function(laborers, available_area, fallow = T, type = 'asymptote'){
-  potential_area <- max.ag.labor * laborers * ifelse(fallow, 2, 1) / labor.per.hectare
+max_cultivable_land <- function(laborers, farming_labor, available_area, fallow = T, type = 'asymptote'){
+  potential_area <- max_labor * farming_labor * laborers * ifelse(fallow, 2, 1) / labor.per.hectare
   if(type == 'unlimited') return(potential_area)
   if(type == 'step') return(pmin(available_area, potential_area))
   if(type == 'asymptote') return(available_area * (1 - exp(-potential_area / available_area)))
@@ -198,7 +199,7 @@ max_cultivable_land <- function(laborers, available_area, fallow = T, type = 'as
 
 ```{r echo = F}
 tibble(laborers = seq(0,30,.1), 
-       potential = max_cultivable_land(laborers, 100, type = 'unlimited'),
+       potential = max_cultivable_land(laborers, farming_labor, 100, type = 'unlimited'),
        Step = max_cultivable_land(laborers, 100, type = 'step'), 
        Asymptote = max_cultivable_land(laborers, 100, type = 'asymptote')) %>%
   gather(Function, value, 3:4) %>% 
@@ -226,7 +227,7 @@ allocate_land <- function(households){
 ```{r farm_funs}
 farm <- function(households){
   households %>%
-    mutate(yield = climatic_yield,
+    mutate(yield = climatic_yield * n_inhabitants ^ labor_elasticity,
            yield_memory = yield, #map2(yield_memory, yield, remember),
            harvest = land * yield * .5 - land * sowing_rate) #%>%  # *.5 is for fallow
     #select(-yield)
@@ -421,8 +422,9 @@ create.households <- function(x){
   tibble(household = 1:x,
          n_inhabitants = init_inhabitants,
          storage = n_inhabitants * wheat.req,
-         yield_memory = max.yield,#list(rep(max.yield, memory_length)),
+         yield_memory = max_yield,#list(rep(max_yield, memory_length)),
          land = calc_land_req(n_inhabitants, peak_end(yield_memory)),
+         farming_labor = 1,
          food_ratio = 1) %>%
     mutate(inhabitants = map(n_inhabitants, create.inhabitants),
            laborers = map_dbl(inhabitants, ~filter(.x, age >= 15 & age < 65) %>% nrow))
@@ -455,6 +457,7 @@ environment <- tibble(x = 1, y = 1, area = 1, arable_proportion = 1, precipitati
 # this function takes a settlement (tibble of households), and makes the households do stuff
 household_dynamics <- function(settlements){
   unnest(settlements) %>%
+    allocate_time %>%
     allocate_land %>%
     farm %>%
     eat %>%
@@ -648,8 +651,6 @@ geom_point(aes(size = n_inhabitants)) +
     coord_quickmap()
 ```
 
-```{r}
-```
 
 Functions for converting vegetation succession stage to woody biomass (per m2) and back again.
 ```{r}
@@ -675,7 +676,7 @@ qplot(0:50, vegetation_to_biomass(0:50), geom = 'line') +
 
 ```{r}
 wood_req <- 1600 # yearly firewood requirement (kg) per person
-max_wood_gather_intensity <- 0.08 * 1e6 # maximum wood gathering intensity in kg/m2, converted to to kg/km2
+max_wood_gather_intensity <- 0.08 * 1e6 # maximum wood gathering intensity in kg/m2, converted to to kg/km2 ### should tweak to account for grid cellsbeing less than 1km2
 
 gather_wood <- function(settlements){
   settlements %>%
@@ -710,14 +711,41 @@ rm(slope.c, speed.c, hd, adj)
 ```{r}
 test <- settlement_locations %>%
   select(lon:lat) %>%
+  as.matrix %>%
+  accCost(Conductance.c,.)
+plot(test < 4)
+```
+
+```{r}
+test <- settlement_locations %>%
+  select(lon:lat) %>%
   mutate(costs = map2(lon, lat, get_farming_catchment))
 
 get_farming_catchment <- function(x, y, conductance = Conductance.c){
   accCost(conductance, c(x, y)) %>%
     as.data.frame(xy = T, na.rm = T) %>%
     rename(distance = layer) %>%
-    mutate(distance = distance / 3600) %>%
     filter(distance <= .5)
 }
+plot((accCost(Conductance.c, c(9, 36.5))) <= 1)
+area(elevation) %>%
+  raster::extract(matrix(c(9,36.5), nrow = T,byrow = T), buffer = 6000) %>% unlist %>% sum
+cellStats((accCost(Conductance.c, c(9, 36.5)) <= 1) * area(elevation), sum)
+```
+
+```{r}
+library(devtools)
+install_github('eScienceCenter/SiteExploitationTerritories')
+library(SiteExploitationTerritories)
+
+SiteExploitationTerritories <- edit(SiteExploitationTerritories)
+
+test <- settlement_locations %>%
+  select(id,lon:lat) %>%
+  rename(X = lon, Y = lat) %>%
+SiteExploitationTerritories(.,elevation, slope = '', timeOfInterest = 4, numberOfIsochrones = 4) %>% 
+  map(1)
+test
+rasterToContour(area(elevation),levels=seq(0, 2, 1))
 ```
 
