@@ -749,3 +749,29 @@ test
 rasterToContour(area(elevation),levels=seq(0, 2, 1))
 ```
 
+```{r}
+prec_200 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.010001-019912.nc') + 
+             brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.010001-019912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:100, each = 12), sum)
+
+prec_2000 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.190001-199912.nc') + 
+              brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.190001-199912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:100, each = 12), sum) %>%
+  mean
+
+prec_annual_2k <- prec * prec_200 / prec_2000
+#writeRaster(prec_annual_2k, 'data/CCSM4/prec_annual_1km.tif')
+```
+
