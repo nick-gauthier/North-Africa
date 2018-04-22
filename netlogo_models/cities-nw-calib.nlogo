@@ -1,7 +1,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setup Procedures ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;
-extensions [ nw ls csv palette gis ]
+extensions [ nw csv palette gis ]
 
 breed [ cities city]
 cities-own [ population attractiveness name coastal?]
@@ -15,13 +15,12 @@ globals [
 ]
 
 to setup
-  ls:reset
   clear-all
   set-default-shape turtles "circle"
-  resize-world 0 99 0 99
-  set-patch-size 5
+  ;resize-world 0 99 0 99
+  ;set-patch-size 5
 
-  if use-gis? [ setup-gis ]
+  setup-gis
 
   setup-cities
 
@@ -64,20 +63,12 @@ to setup-gis
 end
 
 to setup-cities
-  if use-gis? = FALSE [
-    create-cities city-count [ move-to one-of patches ]
-  ]
-
   ask cities [
     ifelse [distance-coast] of patch-here  <= 1000 [set coastal? TRUE] [set coastal? FALSE]
     set size 1
     set attractiveness 1
     set color blue
-    create-links-from other cities [ hide-link ]
-    if use-ls? [
-      ls:create-models 1 "Roman_LULCC.nlogo"
-      ls:ask ls:models [ set dynamic-pop FALSE setup ]
-    ]
+    create-links-to min-n-of 10 other cities [distance myself] [ hide-link ]
   ]
   update-population
 end
@@ -88,7 +79,6 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;
 
 to go
-  if use-ls? [ ls:ask ls:models [ go ] ]
   update-flows
   update-attractiveness
   update-population
@@ -111,7 +101,7 @@ to update-attractiveness
   ask cities [
     let in-flows sum [ flow ] of my-in-links
     if coastal? [set in-flows in-flows + in-flows * coastal-flows]
-    set attractiveness attractiveness + dt * (in-flows - attractiveness) * attractiveness
+    set attractiveness attractiveness + dt * (in-flows - attractiveness)
   ]
 end
 
@@ -134,11 +124,11 @@ end
 GRAPHICS-WINDOW
 224
 10
-732
-519
+940
+373
 -1
 -1
-5.0
+7.08
 1
 10
 1
@@ -151,7 +141,7 @@ GRAPHICS-WINDOW
 0
 99
 0
-99
+49
 1
 1
 1
@@ -216,9 +206,9 @@ SLIDER
 287
 alpha
 alpha
-.9
-1.1
-0.9
+.85
+1.15
+1.05
 .01
 1
 NIL
@@ -233,7 +223,7 @@ beta
 beta
 20
 60
-40.0
+20.0
 5
 1
 NIL
@@ -250,43 +240,6 @@ Scaling Parameters
 1
 
 SLIDER
-4
-131
-176
-164
-city-count
-city-count
-0
-100
-100.0
-5
-1
-NIL
-HORIZONTAL
-
-SWITCH
-6
-54
-112
-87
-use-ls?
-use-ls?
-1
-1
--1000
-
-SWITCH
-7
-92
-123
-125
-use-gis?
-use-gis?
-0
-1
--1000
-
-SLIDER
 3
 169
 175
@@ -297,6 +250,21 @@ coastal-flows
 1
 0.1
 .1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+11
+99
+183
+132
+sim-length
+sim-length
+100
+1000
+100.0
+100
 1
 NIL
 HORIZONTAL
