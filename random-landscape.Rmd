@@ -1,0 +1,36 @@
+---
+title: "Untitled"
+author: "Nick Gauthier"
+date: "January 29, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(NLMR)
+library(raster)
+library(magrittr)
+```
+
+```{r}
+set.seed(1000)
+nr <- nlm_randomcluster(100, 100, p = 0.5)
+weighting <- c(.5, .25, .25)
+cr <- util_classify(nr, weighting)
+util_plot(nr)
+util_plot((cr + 1) * 20)
+```
+
+```{r}
+x <- nlm_mpd(100, 100, roughness = .5) * 10
+crs(x) <- "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m"
+slope.reclass <- matrix(c(0, 10, 1, 10, 20, 0.75, 20, 60, 0.25, 60, 90, 0),
+                        ncol = 3, byrow = T)
+terrain(x, opt = 'slope', unit = 'degrees') %>%
+  reclassify(slope.reclass) %>% 
+  plot
+```
+
+
