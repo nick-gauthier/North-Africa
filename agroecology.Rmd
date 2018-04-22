@@ -55,66 +55,6 @@ expand.grid(fertility = 0:100, population = 0:5, soil.type = degradation$type, s
   labs(title = 'Impact of population density on soil fertility change', x = 'Soil fertility (%)', y = 'Rate of fertility change') +
   theme_minimal()
 ```
-### Time Allocation
-```{r}
-calc_utility <- function(p = 1, b = 1, lf, lm = 1 - lf, j = 0.2, r = 1, k = 0.6, a = 1, w = 0){
-  le <- 1 - lf - lm
-  q <- infrastructure_quality(lm)
-  p * b * lf ^ j * (q + r) ^ k * a ^ (1 - j - k) + w * le
-}
-```
-
-```{r}
-expand.grid(b = max_yield, lf = seq(0,1,.01), r = 1:10, a = 30) %>%
-  mutate(utility = calc_utility(b = b, lf = lf, r = r, a = a)) %>%
-  ggplot(aes(lf, utility, color = r, group = r)) +
-  geom_line() +
-  theme_minimal()
-```
-
-```{r}
-tibble(rain = seq(.14, 1, .01), linear = rain, power = rain^.6, log = 0.51 * log(rain) + 1.03) %>%
-  gather(key, value, linear:log) %>%
-  ggplot(aes(rain, value, group = key, color = key)) +
-  geom_line()
-
-
-tibble(area = seq(0,1,.01), linear = area, power = area^.2, asymptote = (1 - exp(-area / 1))) %>%
-  gather(key, value, linear:asymptote) %>%
-  ggplot(aes(area, value, group = key, color = key)) +
-  geom_line()
-```
-
-```{r}
-allocate_time <- function(l = 1, j = 0.2, r = 1, k = 0.6, psi = 0.2, e = 0.18, s = 1){
-  #qmax <- s * r
-  #region 2
-  #(1 / (j + k)) * (k * l + j * (psi - e) - 2 * j * e * r / qmax)
-  #region 3
-  household %>%
-    mutate(farming_labor = 1 - psi - e)
-  #psi + e
-}
-```
-
-```{r}
-infrastructure_quality <- function(lm, psi = .2, epsilon = .18, imax = 1){
-  ifelse(0 <= lm & lm < (psi - epsilon), 0,
-  ifelse((psi - epsilon) <= lm & lm <= (psi + epsilon), imax / (2 * epsilon) * (lm - psi + epsilon), imax))
-}
-```
-
-```{r}
-psi = .2; epsilon = .18
-tibble(lm = seq(0, 1, .001), i = infrastructure_quality(lm)) %>%
-  ggplot(aes(lm, i)) +
-    geom_vline(xintercept = psi + epsilon, linetype = 2, color = 'grey') +
-  geom_line() +
-  labs(title = 'Impact of infrastructure maintainance on performance',
-       x = 'Labor devoted to maintaining infrastructure', y = 'Infrastructure performance') +
-  theme_minimal()
-```
-
 
 ### Farming
 Agents determine how much land they need, calculate the yields from their land, remember these yields, and harvest from the land.
@@ -150,25 +90,85 @@ calc_yield_reduction <- function(fertility, climate_yield){
 ```
 
 
-```{r echo=F, fig.wdith = 8}
-p1 <- tibble(fertility = 1:100, yield = calc_yield_reduction(fertility, 2000)) %>%
+```{r eval=FALSE, fig.wdith=, include=FALSE}
+tibble(fertility = 1:100, yield = calc_yield_reduction(fertility, 2000)) %>%
   ggplot(aes(fertility, yield)) +
   geom_line() +
   scale_y_continuous(limits = c(0,3000)) +
   labs(title = 'Soil fertility impact on wheat yield', subtitle = 'Assuming 1m annual precipitation',
        x = 'Soil Fertility (%)', y = 'Wheat Yield (kg/ha)') +
   theme_minimal()
+```
 
-p2 <- tibble(precipitation = seq(0, 2, .1), yield = calc_climatic_yield(precipitation)) %>%
+```{r echo = F}
+tibble(precipitation = seq(0, 2, .1), yield = calc_climatic_yield(precipitation)) %>%
   ggplot(aes(precipitation, yield)) +
   geom_line() +
-  scale_y_continuous(limits = c(0,3000)) +
   labs(title = 'Precipitation impact on wheat yield', subtitle = 'Assuming 100% soil fertility',
        x = 'Annual Precipitation (m)', y = 'Wheat Yield (kg/ha)') +
   theme_minimal()
-
-grid.arrange(p1, p2, ncol = 2)
 ```
+### Time Allocation
+```{r}
+calc_utility <- function(p = 1, b = 1, lf, lm = 1 - lf, j = 0.2, r = 1, k = 0.6, a = 1, w = 0){
+  le <- 1 - lf - lm
+  q <- infrastructure_quality(lm)
+  p * b * lf ^ j * (q + r) ^ k * a ^ (1 - j - k) + w * le
+}
+```
+
+```{r}
+infrastructure_quality <- function(lm, psi = .2, epsilon = .18, imax = 1){
+  ifelse(0 <= lm & lm < (psi - epsilon), 0,
+  ifelse((psi - epsilon) <= lm & lm <= (psi + epsilon), imax / (2 * epsilon) * (lm - psi + epsilon), imax))
+}
+```
+
+```{r}
+psi = .2; epsilon = .18
+tibble(lm = seq(0, 1, .001), i = infrastructure_quality(lm)) %>%
+  ggplot(aes(lm, i)) +
+    geom_vline(xintercept = psi + epsilon, linetype = 2, color = 'grey') +
+  geom_line() +
+  labs(title = 'Impact of infrastructure maintainance on performance',
+       x = 'Labor devoted to maintaining infrastructure', y = 'Infrastructure performance') +
+  theme_minimal()
+```
+
+```{r}
+expand.grid(b = max_yield, lf = seq(0,1,.01), r = 1:10, a = 30) %>%
+  mutate(utility = calc_utility(b = b, lf = lf, r = r, a = a)) %>%
+  ggplot(aes(lf, utility, color = r, group = r)) +
+  geom_line() +
+  theme_minimal()
+```
+
+```{r}
+tibble(rain = seq(.14, 1, .01), linear = rain, power = rain^.6, log = 0.51 * log(rain) + 1.03) %>%
+  gather(key, value, linear:log) %>%
+  ggplot(aes(rain, value, group = key, color = key)) +
+  geom_line()
+
+
+tibble(area = seq(0,1,.01), linear = area, power = area^.2, asymptote = (1 - exp(-area / 1))) %>%
+  gather(key, value, linear:asymptote) %>%
+  ggplot(aes(area, value, group = key, color = key)) +
+  geom_line()
+```
+
+```{r}
+allocate_time <- function(households, l = 1, j = 0.2, r = 1, k = 0.6, psi = 0.2, e = 0.18, s = 1){
+  #qmax <- s * r
+  #region 2
+  #(1 / (j + k)) * (k * l + j * (psi - e) - 2 * j * e * r / qmax)
+  #region 3
+  households %>%
+    mutate(farming_labor = 1 - psi - e)
+  #psi + e
+}
+```
+
+
 
 How agents decide the amount of land they need to farm. The determination of how much land is needed is a function of the household's occupants and labor availability.
 ```{r}
@@ -199,9 +199,9 @@ max_cultivable_land <- function(laborers, farming_labor, available_area, fallow 
 
 ```{r echo = F}
 tibble(laborers = seq(0,30,.1), 
-       potential = max_cultivable_land(laborers, farming_labor, 100, type = 'unlimited'),
-       Step = max_cultivable_land(laborers, 100, type = 'step'), 
-       Asymptote = max_cultivable_land(laborers, 100, type = 'asymptote')) %>%
+       potential = max_cultivable_land(laborers, 1, 100, type = 'unlimited'),
+       Step = max_cultivable_land(laborers, 1, 100, type = 'step'), 
+       Asymptote = max_cultivable_land(laborers, 1, 100, type = 'asymptote')) %>%
   gather(Function, value, 3:4) %>% 
   ggplot(aes(potential, value, color = Function)) +
   geom_line() +
@@ -218,7 +218,7 @@ first, for dev purposes, make a fake environment raster.
 allocate_land <- function(households){
   households %>% 
    mutate(land = calc_land_req(n_inhabitants, peak_end(yield_memory)),
-          max_land = max_cultivable_land(laborers, area * arable_proportion * 100, fallow = T, type = 'asymptote')) %>%
+          max_land = max_cultivable_land(laborers, farming_labor, area * arable_proportion * 100, fallow = T, type = 'asymptote')) %>%
     mutate(land = pmin(land, max_land)) %>%
     select(-max_land)
 }
@@ -227,7 +227,7 @@ allocate_land <- function(households){
 ```{r farm_funs}
 farm <- function(households){
   households %>%
-    mutate(yield = climatic_yield * n_inhabitants ^ labor_elasticity,
+    mutate(yield = climatic_yield, #* n_inhabitants ^ labor_elasticity,
            yield_memory = yield, #map2(yield_memory, yield, remember),
            harvest = land * yield * .5 - land * sowing_rate) #%>%  # *.5 is for fallow
     #select(-yield)
@@ -344,7 +344,7 @@ calculate_births <- function(households){
 }
 
 give_birth <- function(inhabitants, births){
-  if(births > 0) inhabitants <- add_row(inhabitants, age = rep(0, births))
+  if(births > 0 %% !is.na(births)) inhabitants <- add_row(inhabitants, age = rep(0, births))
   return(inhabitants)
 }
 
@@ -431,7 +431,7 @@ create.households <- function(x){
 }
 
 create.inhabitants <- function(x){
-  tibble(age = round(runif(x, 1, 60)))
+  tibble(age = rep(25,x))#round(runif(x, 1, 60)))
 }
 ```
 
@@ -439,7 +439,7 @@ Create a 2 villages of 10 households with 6 people in each.
 ```{r}
 init_settlements <- 1 
 init_households <- 1
-init_inhabitants <- 5
+init_inhabitants <- 4
 
 population <- tibble(settlement = 1:init_settlements,
                      x = 1, y = 1,
@@ -468,7 +468,13 @@ household_dynamics <- function(settlements){
 # this function takes the master dataframe and calculates the per patch climatic yields from per patch precipitation
 environmental_dynamics <- function(settlements){
   settlements %>%
-    mutate(climatic_yield = calc_climatic_yield(precipitation))
+    mutate(total_land = map_dbl(households, ~sum(.$land)),
+           total_maintainance = map_dbl(households, ~ sum(1 - .$farming_labor)),  #should change from sum when going to 2+ hosheolds
+           infrastructure_condition = infrastructure_quality(total_maintainance),
+           irrigation_water = 1,#infrastructure_condition * runoff * .8 / total_land,
+           irrigation_water = if_else(is.finite(irrigation_water), irrigation_water, 0),
+           precipitation = 1,
+           climatic_yield = calc_climatic_yield(pmin(precipitation + irrigation_water, 3)))
 }
 ```
 
@@ -490,7 +496,7 @@ calc_food <- function(settlements){
 
 
 ```{r simulation}
-nsim <- 400
+nsim <- 700
 replicates <- 4
 
 sim.out <- pblapply(1:replicates, cl = 4, function(j){
@@ -507,6 +513,7 @@ sim.out <- pblapply(1:replicates, cl = 4, function(j){
   }
   return(sim.out.tmp)
 }) %>% bind_rows
+
 ```
 
 ```{r sim-plots}
@@ -549,7 +556,46 @@ prec <- brick('data/CHELSA/prec_1km.tif') %>%
   sum %>%
   projectRaster(elevation)
 ```
+```{r eval=FALSE, include=FALSE}
+prec_200 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.010001-019912.nc') + 
+             brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.010001-019912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:100, each = 12), sum)
+gc()
+prec_2000 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.190001-199912.nc') + 
+              brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.190001-199912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:100, each = 12), sum) %>%
+  mean
+gc()
+prec_annual_1km <- (prec * prec_200 / prec_2000) / 1000
+#writeRaster(prec_annual_2k, 'data/CCSM4/prec_annual_1km.tif')
+rm(prec, prec_200, prec_2000)
+```
 
+```{r}
+prec_annual_1km <- brick('data/CCSM4/prec_annual_1km.tif')
+```
+
+```{r}
+runoff <- brick('data/monthly_prec_sum.nc') %>%
+  crop(bbox) %>%
+  sum(na.rm = T) %>%
+  mask(elevation) %>%
+  `/`(1000)
+
+#writeRaster(runoff, 'data/topography/runoff.tif')
+```
 Calculate slope in degrees from 90m SRTM elevation (90m data from http://www.earthenv.org/DEM).
 ```{r slope}
 elev.list <- list.files('data/topography/', pattern = 'bil$', full.names = T, recursive = T) %>%
@@ -572,19 +618,19 @@ arable_proportion <- (slope <= 5) %>%
 
 Get the area of each grid cell, in km2.
 ```{r}
-area <- area(elevation)
+area <- area(elevation) %>%
+  mask(elevation)
+```
+
+```{r}
+max_veg_stage <- raster('data/MODIS/veg_stage.tif')
 ```
 
 Let's put all these environmental rasters together in a single brick for easier access.
 ```{r}
-environment <- brick(arable_proportion, prec, area) %>%
-  as.data.frame(na.rm = T, xy = T, centroids = T) %>%
-  as_tibble %>%
-  remove_rownames %>%
-  rename(arable_proportion = layer.1, precipitation = layer.2, area = layer.3) %>%
-  mutate(precipitation = precipitation / 1000,
-         x = round(x, 6), y = round(y, 6))
-environment
+environment <- brick(arable_proportion, runoff, area, max_veg_stage)
+names(environment) <- c('arable_proportion', 'runoff', 'area', 'max_veg_stage')
+plot(environment)
 ```
  
  Now import archaeological data
@@ -614,8 +660,8 @@ init_inhabitants <- 4
 
 population <- settlement_locations %>%
   select(lon:lat) %>%                        # get the x and y coordinates of settlements
-  rasterize(prec, fun = 'count') %>%    # create a raster representing the count of settlements in each cell
-  mask(prec) %>%
+  rasterize(elevation, fun = 'count') %>%    # create a raster representing the count of settlements in each cell
+  mask(elevation) %>%
   as.data.frame(xy = T, na.rm = T, centroids = T) %>%
   remove_rownames %>%
   as.tibble %>%
@@ -626,29 +672,96 @@ population <- settlement_locations %>%
 ```
 
 ```{r}
-nsim <- 400
-
-test <- left_join(population, environment) %>%
-  filter(!is.na(precipitation)) %>%
+test <- population %>%
+  select(x, y) %>%
+  raster::extract(environment, .) %>%
+  cbind(population, .) %>%
   filter(arable_proportion > 0)
-test %>% 
-  mutate(groups = rep(1:3, length.out = nrow(.))) %>%
-  split(.$groups)
-
-
-system.time(
-for(i in 1:nsim){
-  test <- test %>% 
-    environmental_dynamics %>%
-    household_dynamics
-  }
-)
 ```
 
 ```{r}
-ggplot(test %>% unnest, aes(x,y)) +
-geom_point(aes(size = n_inhabitants)) +
-    coord_quickmap()
+environmental_dynamics <- function(settlements, time_step = 1){
+  index <- ifelse((time_step %% 100) > 0, time_step %% 100, 100)
+  rain <- settlements %>%
+    select(x, y) %>%
+    raster::extract(prec_annual_1km[[index]],.)
+  
+  settlements %>%
+    mutate(#total_land = map_dbl(households, ~sum(.$land)),
+           total_maintainance = map_dbl(households, ~ sum(1 - .$farming_labor)),  #should change from sum when going to 2+ hosheolds
+           infrastructure_condition = infrastructure_quality(total_maintainance),
+           irrigation_water = infrastructure_condition *(runoff > 1),#* runoff * .8 / total_land,
+           irrigation_water = if_else(is.finite(irrigation_water), irrigation_water, 0),
+           precipitation = rain,
+           climatic_yield = calc_climatic_yield(pmin(precipitation + irrigation_water, 3)))
+}
+```
+
+```{r}
+nsim <- 600
+out <- split(test, 1:6) %>% 
+  pblapply(cl = 6, function(dat){
+  for(i in 1:nsim){
+  dat <- dat %>% 
+    environmental_dynamics(time_step = i) %>%
+    household_dynamics
+  }
+      return(dat)
+
+  }) %>% bind_rows
+```
+
+```{r}
+roads <- rgdal::readOGR('data/Shapefiles/ba_roads.shp') %>%
+  spTransform(CRS('+proj=longlat')) %>%
+  crop(bbox) %>%
+  fortify
+costs <- test / 3600
+costs[costs > 4] <- NA
+plot(exp(-.5 * costs))
+
+lc_ad200 <- max_veg_stage %>% 
+  brick(exp(-.5 * costs)) %>%
+  mask(elevation) %>%
+  as.data.frame(na.rm = T, xy = T) %>% 
+ mutate(pft = recode_factor(as.factor(veg_stage),
+                            `50` = 'Forest',
+                              `30` = 'Shrub',
+                              `10` = 'Grass',
+                              `0` = 'Barren')) %>%
+  mutate(layer = if_else(pft == 'Barren', 0, layer))
+
+mat <- focalWeight(elevation, 3, type = 'circle')
+
+pop_dist <- out %>%
+  unnest %>%
+  select(x, y, n_inhabitants) %>%
+  with(., .[rep(1:nrow(.), n_inhabitants),]) %>%
+  select(x,y) %>%
+  as.matrix %>%
+  rasterize(elevation,fun = 'count')  %>% 
+  focal(mat, fun = mean,na.rm = T, pad = T)
+  plot(pop_dist)
+  
+ggplot(unnest(out), aes(x,y)) +
+  geom_raster(data = lc_ad200, aes(fill = pft))+#, alpha = 1 - layer)) + 
+  geom_raster(data = shade, aes(alpha = layer)) +
+  #geom_path(data = roads, aes(long, lat, group = group), alpha = .2) +
+  #geom_point(aes(size =n_inhabitants), alpha = .9) +
+  #scale_size_area() +
+  #scale_alpha(range = c(.6,0)) +
+  scale_fill_manual(values = c('#008000' ,'#99CC00', '#99FF99','#FFCC99') ) + 
+  theme_void() + 
+  coord_quickmap()
+
+t1 <-out %>% unnest %>%
+  select(x,y) %>%
+  as.matrix %>%
+  rasterize(elevation) #%>%
+slope2 <- terrain(elevation, opt = 'slope')
+#slope2[slope2 <.07] <- NA
+asp <- terrain(elevation, opt = 'aspect')
+shade <- hillShade(slope2, asp, normalize = F)  %>% as.data.frame(xy = T, na.rm = T)
 ```
 
 
@@ -703,17 +816,17 @@ hd <- transition(elevation, altDiff, 16, symm=FALSE)
 adj <- adjacent(elevation, cells=1:ncell(elevation), pairs=TRUE, directions=16)
 slope.c <- geoCorrection(hd, type = 'c')
 speed.c <- slope.c
-speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05))
+speed.c[adj] <- 6 * exp(-3.5 * abs(slope.c[adj] + 0.05)) * 1000 / 3600
 Conductance.c <- geoCorrection(speed.c, type = 'c')
 rm(slope.c, speed.c, hd, adj)
 ```
 
 ```{r}
-test <- settlement_locations %>%
-  select(lon:lat) %>%
+test <- unnest(out) %>%
+  select(x:y) %>%
   as.matrix %>%
   accCost(Conductance.c,.)
-plot(test < 4)
+plot((test / 3600) < 1)
 ```
 
 ```{r}
@@ -739,39 +852,49 @@ install_github('eScienceCenter/SiteExploitationTerritories')
 library(SiteExploitationTerritories)
 
 SiteExploitationTerritories <- edit(SiteExploitationTerritories)
-
-test <- settlement_locations %>%
-  select(id,lon:lat) %>%
-  rename(X = lon, Y = lat) %>%
-SiteExploitationTerritories(.,elevation, slope = '', timeOfInterest = 4, numberOfIsochrones = 4) %>% 
+edit(ToblersHikingFunction)
+test <- unnest(out) %>%
+  select(x:y) %>%
+  mutate(id = 1:n()) %>%
+  rename(X =x, Y = y) %>%
+SiteExploitationTerritories(.,elevation, slope = '', timeOfInterest = 4, numberOfIsochrones = 1) %>% 
   map(1)
 test
-rasterToContour(area(elevation),levels=seq(0, 2, 1))
 ```
 
+## Neighbors
+Adapted from http://thestudyofthehousehold.com/2018/01/12/2018-01-12-a-tidy-game-of-life/
 ```{r}
-prec_200 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.010001-019912.nc') + 
-             brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.010001-019912.nc')) %>%
-  rotate %>%
-  crop(bbox, snap = 'out') %>% 
-  `*`(2.628e+9) %>% 
-  projectRaster(prec) %>%
-  crop(bbox) %>%
-  mask(prec) %>% 
-  stackApply(rep(1:100, each = 12), sum)
+# Where are a cell's neighbours
+neighs <- expand.grid(r = -1:1, c = -1:1) %>% 
+  # you can't be your own neighbour
+  filter(!(r == 0 & c == 0))
 
-prec_2000 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.190001-199912.nc') + 
-              brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.190001-199912.nc')) %>%
-  rotate %>%
-  crop(bbox, snap = 'out') %>% 
-  `*`(2.628e+9) %>% 
-  projectRaster(prec) %>%
-  crop(bbox) %>%
-  mask(prec) %>% 
-  stackApply(rep(1:100, each = 12), sum) %>%
-  mean
+# where is _everyone's_ neighbour?!
+ns <- space %>% 
+  tbl_df %>% 
+  mutate(neighbour_coords = map2(r, c, ~ sweep(neighs, 2, c(.x, .y), FUN = `+`))) %>% 
+  unnest(neighbour_coords) %>% 
+  # drop the zeros and any negative cells; these are just outside the space we're studying
+  filter(r1 >= 1 & r1 <= 80,
+         c1 >= 1 & c1 <= 80)
 
-prec_annual_2k <- prec * prec_200 / prec_2000
-#writeRaster(prec_annual_2k, 'data/CCSM4/prec_annual_1km.tif')
+ns %>% 
+  left_join(start, by = c(r1 = "r", c1 = "c")) %>%
+  group_by(r, c) %>% 
+  summarize(sum_neigh = sum(v)) %>% 
+  left_join(start) %>% 
+  mutate(v_new = case_when(
+    # if the focal cell is dead, and has three neighbours, its alive now
+    v == 0 & sum_neigh == 3 ~ 1,
+    v == 1 & sum_neigh < 2  ~ 0,
+    v == 1 & sum_neigh > 3  ~ 0,
+    # otherwise leave it alone
+    TRUE                    ~ v
+  )) %>% 
+  select(r, c, v = v_new, sum_neigh) %>% 
+  ggplot(aes(x = c, y = r, fill = as.factor(v))) %>% 
+  appearance
 ```
+
 
