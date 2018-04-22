@@ -223,8 +223,8 @@ Now do the same for the mid holocene
 temp <- brick('data/CCSM4/temp_200_1km.tif')
 tmin <- brick('data/CCSM4/tmin_200_1km.tif')
 tmax <- brick('data/CCSM4/tmax_200_1km.tif')
-prec <- brick('data/CCSM4/prec_200_1km.tif')
-
+prec2 <- brick('data/CCSM4/prec_200_1km.tif')
+plot(sum(prec2) - sum(prec))
 srad <- list.files('~/Downloads/CGIAR PET/ET_SolRad', full.names = T) %>%
   stack %>%
   crop(bbox) %>%
@@ -257,7 +257,7 @@ for(a in 1:10){
 
 alpha <- sum(aet.brick) / sum(pet)
 writeRaster(alpha, 'data/CCSM4/alpha_200_1km.tif')
-
+alpha <- raster('data/CCSM4/alpha_200_1km.tif')
 t_warm <- max(temp)
 t_cold <- min(temp)
 
@@ -276,7 +276,7 @@ beginCluster(4)
 gdd5 <- clusterR(temp, calc, args = list(fun = gdd5_interp), export = 'doy')
 endCluster()
 writeRaster(gdd5, 'data/CCSM4/gdd5_200_1km.tif', overwrite = T)
-
+gdd5 <- raster('data/CCSM4/gdd5_200_1km.tif')
 
 ad200_predictors <- brick(c(t_warm, t_cold, alpha,gdd5))
 names(ad200_predictors) <- c('t_warm', 't_cold', 'alpha', 'gdd5')
@@ -284,6 +284,56 @@ rm(prec, tmin, tmax, pet, ksoil, aet, aet.brick, swc.tmp, swc, temp, t_warm, t_c
 
 plot(ad200_predictors)
 plot(projectRaster(ad200_predictors,modern_predictors) - modern_predictors)
+```
+
+```{r}
+library(viridis)
+p1 <- ad200_predictors %>%
+  .[[3]] %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x,y)) +
+  geom_raster(aes(fill = alpha)) +
+  scale_fill_viridis(name = '', option = 'cividis', direction = -1, guide = 'legend') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Ratio of actual to potential evapotranspiration') +
+  theme(legend.position='bottom')
+
+p2 <- ad200_predictors %>%
+  .[[4]] %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x,y)) +
+  geom_raster(aes(fill = gdd5)) +
+  scale_fill_viridis(name = 'Degree days', option = 'magma', direction = 1, guide = 'legend') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Growing degree days over 5°C') +
+  theme(legend.position='bottom')
+
+p3 <- ad200_predictors %>%
+  .[[1]] %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x,y)) +
+  geom_raster(aes(fill = t_warm)) +
+  scale_fill_distiller(name = '°C', limits = c(0, 40), palette = 'Spectral', direction = -1, guide = 'legend') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Mean temperature of the warmest month') +
+  theme(legend.position='bottom')
+p4 <- ad200_predictors %>%
+  .[[2]] %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x,y)) +
+  geom_raster(aes(fill = t_cold)) +
+  scale_fill_distiller(name = '°C', limits = c(0, 40), palette = 'Spectral', direction = -1, guide = 'legend') +
+  theme_void() +
+  coord_quickmap() +
+  labs(title = 'Mean temperature of the coldest month') +
+  theme(legend.position='bottom')
+
+gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2, nrow = 2)
+p5 <- gridExtra::arrangeGrob(p1, p2, p3, p4, ncol = 2, nrow = 2)
+ggsave('veg_predictors.pdf', p5, height = 10, width = 10)
 ```
 
 ```{r}
@@ -299,23 +349,39 @@ predictions %>%
   sum %>% plot
 
 library(viridis)
-ad200_predictors %>%
+
+preds <- ad200_predictors %>%
   projectRaster(modern_predictors) %>%
-predict(mod, type = 'response', index = 1:7) %>% 
+predict(mod, type = 'response', index = 1:7)
+
+p1 <- preds %>% 
   .[[2:5]] %>%
   sum %>%
   as.data.frame(xy = T, na.rm = T) %>%
   ggplot(aes(x, y)) +
   geom_raster(aes(fill = layer)) +
-  #scale_fill_distiller(palette = 'YlGn', direction = 1, guide = 'legend', limits = c(0,1),breaks = c(0,.5,1)) +
   scale_fill_viridis(name = 'Probability of \noccurrence', guide = 'legend', limits = c(0,1),breaks = c(0,.5,1)) +
     theme_void() + 
   coord_quickmap() +
-  labs(title = 'Estimated forest cover, 200 CE', subtitle = 'Potential natural vegetation, at equilibrium with climate')
+  labs(title = 'Potential natural vegetation, 200 CE', subtitle = 'Woodland') + 
+    theme(legend.position='bottom')
 
-ggsave('forest_cover.png')
 
-Now import temperature and precipitation data.
+p2 <-preds %>% 
+  .[[7]] %>%
+  as.data.frame(xy = T, na.rm = T) %>%
+  ggplot(aes(x, y)) +
+  geom_raster(aes(fill = layer.7)) +
+  scale_fill_viridis(name = 'Probability of \noccurrence', option = 'inferno', guide = 'legend', limits = c(0,1),breaks = c(0,.5,1)) +
+    theme_void() + 
+  coord_quickmap() +
+  labs(title = ' ', subtitle = 'Grassland') +
+    theme(legend.position='bottom')
+
+
+gridExtra::grid.arrange(p1,p2, ncol = 2)
+p3 <- gridExtra::arrangeGrob(p1,p2, ncol = 2)
+ggsave('vegetation_predictions_altcolor.pdf', p3, width = 10)
 ```
 
 ```{r climate}
@@ -352,7 +418,7 @@ ggsave('ce200_gdd.png')
 
 ```{r}
 ad200_lc_preds <- ad200_predictors %>%
-  projectRaster(modern_predictors) %>%
+  #projectRaster(modern_predictors) %>%
 predict(mod, type = 'response', index = 1:7)
 
 ad200_lc_preds%>% 
@@ -368,7 +434,7 @@ ad200_lc_preds%>%
 
 ```{r}
 plot(ad200_lc_preds)
-brick(sum(ad200_lc_preds[[2:5]]), ad200_lc_preds[[c(1,6,7)]]) %>%
+lc_ad200 <- brick(sum(ad200_lc_preds[[2:5]]), ad200_lc_preds[[c(1,6,7)]]) %>%
   which.max %>% 
   as.data.frame(na.rm = T, xy = T) %>% 
  mutate(pft = recode_factor(as.factor(layer),
@@ -376,8 +442,18 @@ brick(sum(ad200_lc_preds[[2:5]]), ad200_lc_preds[[c(1,6,7)]]) %>%
                               `3` = 'Shrub',
                               `4` = 'Grass',
                               `2` = 'Barren'
-                             )) %>%
-ggplot(aes(x, y)) + 
+                             ))
+
+veg_stage <- brick(sum(ad200_lc_preds[[2:5]]), ad200_lc_preds[[c(1,6,7)]]) %>%
+  which.max
+veg_stage[veg_stage == 1] <- 50
+veg_stage[veg_stage == 3] <- 30
+veg_stage[veg_stage == 4] <- 10
+veg_stage[veg_stage == 2] <- 0
+
+writeRaster(veg_stage, 'data/MODIS/veg_stage.tif')
+
+ggplot(lc_ad200, aes(x, y)) + 
   geom_tile(aes(fill = pft)) + 
   scale_fill_manual(values = c('#008000' ,'#99CC00', '#99FF99', '#FFCC99') ) + 
   theme_void() + 
