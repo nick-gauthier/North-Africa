@@ -1,0 +1,246 @@
+---
+title: "analysis"
+author: "Nick Gauthier"
+date: "March 26, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(raster)
+library(tidyverse)
+library(sf)
+```
+
+
+# real world
+```{r}
+bbox_ll <- extent(5, 11.5, 34, 37.5)
+bbox_utm <- extent(190000, 735000, 3780000, 4150000)
+```
+
+```{r}
+prec <- brick('data/CHELSA/prec_1km.tif') %>% 
+  sum %>% 
+  `/`(1000) %>%
+  projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
+  crop(bbox_utm)
+
+plot(prec)
+```
+
+```{r, cache = TRUE}
+boundary <- (!prec) %>% 
+  rasterToPolygons(dissolve = TRUE) %>% 
+  st_as_sf %>%
+  st_cast('POLYGON') %>%
+  mutate(area = st_area(geometry)) %>%
+  filter(area == max(area))
+```
+
+```{r, cache = TRUE}
+slope <- raster('data/topography/earthenv_90m.tif') %>% 
+  crop(bbox_ll) %>%
+  projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
+  terrain(opt = 'slope', unit = 'degrees') %>%
+  crop(bbox_utm) %>%
+  mask(as(boundary, 'Spatial')) 
+```
+
+```{r}
+plot(prec)
+plot(slope)
+```
+```{r}
+max_veg_stage <- raster('data/MODIS/veg_stage.tif') %>%
+    projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m", method = 'ngb')
+
+plot(max_veg_stage)
+```
+
+```{r}
+hex <- boundary %>%
+  st_make_grid(cellsize = 10000, square = FALSE) %>%
+  st_sf %>%
+  mutate(precipitation = raster::extract(prec, ., fun = mean, na.rm = TRUE),
+         area = as.numeric(st_area(geometry)) * 1e-6, # convert from m2 to km2
+         arable = raster::extract(slope <= 5, ., fun = sum, na.rm = TRUE) / 
+           raster::extract(setValues(slope, 1), ., fun = sum, na.rm = TRUE),
+         cultivable_area = area * arable,
+         max_veg_stage = raster::extract(max_veg_stage, ., fun = modal, na.rm = TRUE)) %>%
+  filter(cultivable_area >= 1) # need at least 1km2
+```
+
+
+```{r}
+ggplot(hex) +
+  geom_sf(aes(fill = precipitation), color = 'white') +
+  scale_fill_distiller(palette = 'YlGnBu', direction = 1) +
+  coord_sf(datum = NA) +
+  theme_void()
+ggplot(hex) +
+  geom_sf(aes(fill = precipitation, color = precipitation)) +
+  scale_fill_distiller(palette = 'YlGnBu', direction = 1) +
+    scale_color_distiller(palette = 'YlGnBu', direction = 1) +
+  coord_sf(datum = NA) +
+  theme_void()
+
+
+ggplot(hex) +
+  geom_sf(aes(fill = cultivable_area), color = 'white') +
+  scale_fill_viridis_c() +
+  coord_sf(datum = NA) +
+  theme_void()
+
+ggplot(hex) +
+  geom_sf(aes(fill = cultivable_area, color = cultivable_area)) +
+    scale_fill_viridis_c() +
+  scale_color_viridis_c() +
+  coord_sf(datum = NA) +
+  theme_void()
+
+lc_colors <- c('#fffbc3', '#dcce00', '#97bf47', '#018200')
+hex %>%
+  mutate(stage = as.factor(max_veg_stage)) %>%
+ggplot() +
+  geom_sf(aes(fill = stage), color = 'white') +
+  scale_fill_manual(values = lc_colors) +
+  coord_sf(datum = NA) +
+  theme_void()
+```
+
+```{r}
+tmp <- create_settlements(hex)
+```
+
+
+```{r}
+hyde <- raster('../North-Africa/cropland200AD.asc') %>%
+  `crs<-`(value = '+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0') %>%
+    projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
+  crop(bbox)
+
+plot(hyde)
+```
+
+# Environment
+
+## Input data
+
+Set a bounding box for the study area.
+```{r bbox}
+bbox <- extent(5, 11.5, 34, 37.5)
+elevation <- raster('~/gdrive/Data/SRTM_1km.tif') %>% crop(bbox)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+prec_200 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.010001-019912.nc') + 
+             brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.010001-019912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:100, each = 12), sum)
+gc()
+prec_2000 <- (brick('data/CCSM4/trans1-850AD.cam.h0.PRECC.190001-199912.nc') + 
+              brick('data/CCSM4/trans1-850AD.cam.h0.PRECL.190001-199912.nc')) %>%
+  rotate %>%
+  crop(bbox, snap = 'out') %>% 
+  `*`(2.628e+9) %>% 
+  projectRaster(prec) %>%
+  crop(bbox) %>%
+  mask(prec) %>% 
+  stackApply(rep(1:100, each = 12), sum) %>%
+  mean
+gc()
+prec_annual_1km <- (prec * prec_200 / prec_2000) / 1000
+#writeRaster(prec_annual_2k, 'data/CCSM4/prec_annual_1km.tif')
+rm(prec, prec_200, prec_2000)
+```
+
+```{r}
+prec_annual_1km <- brick('data/CCSM4/prec_annual_1km.tif')
+plot(prec_annual_1km)
+```
+
+```{r}
+runoff <- brick('data/monthly_prec_sum.nc') %>%
+  crop(bbox) %>%
+  sum(na.rm = T) %>%
+  mask(elevation) %>%
+  `/`(1000)
+
+#writeRaster(runoff, 'data/topography/runoff.tif')
+```
+Calculate slope in degrees from 90m SRTM elevation (90m data from http://www.earthenv.org/DEM).
+```{r slope}
+elev.list <- list.files('data/topography/', pattern = 'bil$', full.names = T, recursive = T) %>%
+  map(raster)
+elev.list$fun <- mean
+
+slope <- do.call(mosaic, elev.list) %>% 
+  crop(bbox) %>%
+  terrain(opt = 'slope', unit = 'degrees')
+```
+
+Where is the arable land? Calculate the proportion of land with =< 5 degree slope. Also find land with slope between 5 and 15 degrees, as potential land for terracing.
+```{r arable_land}
+arable_proportion <- (slope <= 5) %>% 
+  aggregate(fact = 10, fun = sum) %>% 
+  mask(elevation) %>%
+  `/`(100)
+```
+
+
+
+
+Let's put all these environmental rasters together in a single brick for easier access.
+```{r}
+environment <- brick(arable_proportion, runoff, area, max_veg_stage)
+names(environment) <- c('arable_proportion', 'runoff', 'area', 'max_veg_stage')
+plot(environment)
+```
+ 
+ Now import archaeological data
+```{r}
+settlement_locations <- pl_search_places() %>%
+  filter(locationPrecision == 'precise') %>%
+  select(title, type = featureTypes, description, 
+         lon = reprLong, lat = reprLat, 
+         periods = timePeriods, minDate, maxDate, id, tags) %>%
+  filter(between(lat, 34, 37.5) & between(lon, 5, 11.5)) %>%
+  collect  %>%
+  filter(str_detect(periods, 'R')) %>%
+  filter(str_detect(type, 'settlement'))
+```
+ 
+```{r echo = F}
+ggplot(settlement_locations, aes(lon, lat)) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = F, n = 500, h = 1) +
+  scale_fill_viridis() +
+  coord_fixed() +
+  theme_void()
+```
+
+```{r}
+init_households <- 1
+init_inhabitants <- 4
+
+population <- settlement_locations %>%
+  select(lon:lat) %>%                        # get the x and y coordinates of settlements
+  rasterize(elevation, fun = 'count') %>%    # create a raster representing the count of settlements in each cell
+  mask(elevation) %>%
+  as.data.frame(xy = T, na.rm = T, centroids = T) %>%
+  remove_rownames %>%
+  as.tibble %>%
+  mutate(settlement = 1:n(), x = round(x, 6), y = round(y, 6)) %>%   # the coordinates here and in the environment raster need to be rounded to correct for floating point inequality issues
+  select(-layer) %>%
+  mutate(households = init_households,
+         households = map(households, create.households))
+```
