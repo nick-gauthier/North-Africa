@@ -1,0 +1,74 @@
+---
+title: "fiscal-demographic"
+author: "Nick Gauthier"
+date: "January 24, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, message=F, warning=F}
+library(deSolve)
+library(phaseR)
+```
+
+Second let's write a convenience function that calls on phaseR under the hood to generate the flow field, nullclines, and sample trajectories for a given system and parameterization.
+
+```{r}
+phasePlot <- function(mod, params, xmax = 1, ymax = 1){
+  xlim <- c(.1, xmax)
+  ylim <- c(0, ymax)
+  
+  y0 <- matrix(c(1, 2),
+             ncol = 2, nrow = 1,
+             byrow = TRUE)  
+  
+  flw <- flowField(mod, xlim = xlim, ylim = ylim, parameters = params, 
+                   xlab = 'Population', ylab = 'State coffers', add = F)
+  nc <- nullclines(mod, xlim = xlim, ylim = ylim, parameters = params)
+  trj <- trajectory(mod, y0 = y0, tlim = c(0,200), col = rep('black', nrow(y0)), parameters = params)
+}
+```
+
+# Model 1: Simple consumer-resource system with network effects
+First, we'll replicate the model of Muneepeerakul and Qubbaj (2012). It's a simple consumer resource system, with parameterized flows of population and resources (i.e. immigration and trade).
+
+Setup the model.
+
+```{r}
+netMod <- function(t, y, parameters){
+    r <- parameters[1]
+    q <- parameters[2]
+    N <- y[1]
+    K <- y[2]
+
+    dy <- numeric(2)
+    dy[1] <- r * N * (1 - N / K)
+    dy[2] <- (q / (q - 1)) * N / (N + (1/(q - 1))) - K
+    list(dy)
+}
+
+derivative <- function(t, y, parameters) {
+  alpha <- parameters[1]
+  beta  <- parameters[2]
+  x     <- y[1]
+  y     <- y[2]
+  dy    <- numeric(2)
+  dy[1] <- alpha*y
+  dy[2] <- beta*x
+  list(dy)
+}
+```
+
+No scaling
+```{r fig.width = 6, fig.height = 6}
+phasePlot(netMod, c(0.02, 1.2), xmax = 1.5, ymax = 1.5)
+
+flowField(netMod, xlim = c(.1, 5), ylim = c(0, 5), parameters = c(0.02, 1.2), 
+                   xlab = 'Population', ylab = 'State coffers', add = F)
+
+phasePlaneAnalysis(netMod, c(.01,1.5), c(0,1.5), parameters = c(0.2, 1.2))
+```
