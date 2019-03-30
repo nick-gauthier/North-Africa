@@ -13,13 +13,18 @@ knitr::opts_chunk$set(echo = TRUE)
 library(raster)
 library(tidyverse)
 library(sf)
+library(tidygraph)
+library(ggraph)
+library(patchwork)
 ```
 
 
 # real world
 ```{r}
-bbox_ll <- extent(5, 11.5, 34, 37.5)
-bbox_utm <- extent(190000, 735000, 3780000, 4150000)
+#bbox_ll <- extent(5, 11.5, 34, 37.5)
+#bbox_utm <- extent(190000, 735000, 3780000, 4150000) # this goes into algeria
+bbox_ll <- extent(7, 11.5, 34, 37.5)
+bbox_utm <- extent(345000, 735000, 3780000, 4150000)
 ```
 
 ```{r}
@@ -28,8 +33,6 @@ prec <- brick('data/CHELSA/prec_1km.tif') %>%
   `/`(1000) %>%
   projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
   crop(bbox_utm)
-
-plot(prec)
 ```
 
 ```{r, cache = TRUE}
@@ -51,51 +54,53 @@ slope <- raster('data/topography/earthenv_90m.tif') %>%
 ```
 
 ```{r}
-plot(prec)
-plot(slope)
-```
-```{r}
 max_veg_stage <- raster('data/MODIS/veg_stage.tif') %>%
     projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m", method = 'ngb')
+```
 
-plot(max_veg_stage)
+```{r}
+prec_annual_1km <- brick('data/CCSM4/prec_annual_1km.tif') %>%
+   crop(bbox_ll) %>%
+  `/`(1000) %>%
+  projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m", method = 'ngb') %>%
+  crop(bbox_utm) %>%
+  mask(as(boundary, 'Spatial'))
+```
+
+data from 
+Barbarossa, V et al. figshare https://dx.doi.org/10.6084/m9.figshare.c.3890224
+```{r}
+streamflow <- brick('data/topography/FLO1K.5min.ts.1960.2015.nc/FLO1K.5min.ts.1960.2015.qav.nc') %>%
+  crop(bbox_ll) %>%
+  mean(na.rm = T) %>%
+  projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m", method = 'ngb') %>%
+  crop(bbox_utm) %>%
+  mask(as(boundary, 'Spatial')) 
 ```
 
 ```{r}
 hex <- boundary %>%
-  st_make_grid(cellsize = 10000, square = FALSE) %>%
+  st_make_grid(cellsize = 7000, square = FALSE) %>%
   st_sf %>%
   mutate(precipitation = raster::extract(prec, ., fun = mean, na.rm = TRUE),
          area = as.numeric(st_area(geometry)) * 1e-6, # convert from m2 to km2
-         arable = raster::extract(slope <= 5, ., fun = sum, na.rm = TRUE) / 
-           raster::extract(setValues(slope, 1), ., fun = sum, na.rm = TRUE),
+         arable = raster::extract(slope <= 5, ., fun = sum, na.rm = TRUE) / raster::extract(setValues(slope, 1), ., fun = sum, na.rm = TRUE),
          cultivable_area = area * arable,
-         max_veg_stage = raster::extract(max_veg_stage, ., fun = modal, na.rm = TRUE)) %>%
+         max_veg_stage = raster::extract(max_veg_stage, ., fun = modal, na.rm = TRUE),
+         streamflow = raster::extract(streamflow, ., fun = sum, na.rm = TRUE)) %>%
   filter(cultivable_area >= 1) # need at least 1km2
 ```
 
 
 ```{r}
-ggplot(hex) +
-  geom_sf(aes(fill = precipitation), color = 'white') +
-  scale_fill_distiller(palette = 'YlGnBu', direction = 1) +
-  coord_sf(datum = NA) +
-  theme_void()
-ggplot(hex) +
-  geom_sf(aes(fill = precipitation, color = precipitation)) +
+e1 <- ggplot(hex) +
+geom_sf(aes(fill = precipitation, color = precipitation)) +
   scale_fill_distiller(palette = 'YlGnBu', direction = 1) +
     scale_color_distiller(palette = 'YlGnBu', direction = 1) +
   coord_sf(datum = NA) +
   theme_void()
 
-
-ggplot(hex) +
-  geom_sf(aes(fill = cultivable_area), color = 'white') +
-  scale_fill_viridis_c() +
-  coord_sf(datum = NA) +
-  theme_void()
-
-ggplot(hex) +
+e2 <- ggplot(hex) +
   geom_sf(aes(fill = cultivable_area, color = cultivable_area)) +
     scale_fill_viridis_c() +
   scale_color_viridis_c() +
@@ -103,17 +108,32 @@ ggplot(hex) +
   theme_void()
 
 lc_colors <- c('#fffbc3', '#dcce00', '#97bf47', '#018200')
-hex %>%
+e3 <- hex %>%
   mutate(stage = as.factor(max_veg_stage)) %>%
 ggplot() +
-  geom_sf(aes(fill = stage), color = 'white') +
+  geom_sf(aes(fill = stage, color = stage)) +
+  scale_fill_manual(values = lc_colors) +
   scale_fill_manual(values = lc_colors) +
   coord_sf(datum = NA) +
   theme_void()
+
+e4 <- ggplot(hex) +
+  geom_sf(aes(fill = streamflow, color = streamflow)) +
+  coord_sf(datum = NA) +
+  scale_fill_distiller(palette = 'BrBG', direction = 1) +
+    scale_color_distiller(palette = 'BrBG', direction = 1) +
+  theme_void()
+
+e1 + e2 + e3 + e4
 ```
 
+
+
 ```{r}
-tmp <- create_settlements(hex)
+
+
+tbl_graph(nodes = read_csv('data/orbis_nodes_0514.csv'),
+          edges = read_csv('data/orbis_edges_0514.csv'))
 ```
 
 
@@ -121,7 +141,7 @@ tmp <- create_settlements(hex)
 hyde <- raster('../North-Africa/cropland200AD.asc') %>%
   `crs<-`(value = '+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0') %>%
     projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
-  crop(bbox)
+  crop(bbox_utm)
 
 plot(hyde)
 ```
@@ -164,20 +184,6 @@ prec_annual_1km <- (prec * prec_200 / prec_2000) / 1000
 rm(prec, prec_200, prec_2000)
 ```
 
-```{r}
-prec_annual_1km <- brick('data/CCSM4/prec_annual_1km.tif')
-plot(prec_annual_1km)
-```
-
-```{r}
-runoff <- brick('data/monthly_prec_sum.nc') %>%
-  crop(bbox) %>%
-  sum(na.rm = T) %>%
-  mask(elevation) %>%
-  `/`(1000)
-
-#writeRaster(runoff, 'data/topography/runoff.tif')
-```
 Calculate slope in degrees from 90m SRTM elevation (90m data from http://www.earthenv.org/DEM).
 ```{r slope}
 elev.list <- list.files('data/topography/', pattern = 'bil$', full.names = T, recursive = T) %>%
@@ -209,6 +215,7 @@ plot(environment)
  
  Now import archaeological data
 ```{r}
+library(pleides)
 settlement_locations <- pl_search_places() %>%
   filter(locationPrecision == 'precise') %>%
   select(title, type = featureTypes, description, 
@@ -226,21 +233,4 @@ ggplot(settlement_locations, aes(lon, lat)) +
   scale_fill_viridis() +
   coord_fixed() +
   theme_void()
-```
-
-```{r}
-init_households <- 1
-init_inhabitants <- 4
-
-population <- settlement_locations %>%
-  select(lon:lat) %>%                        # get the x and y coordinates of settlements
-  rasterize(elevation, fun = 'count') %>%    # create a raster representing the count of settlements in each cell
-  mask(elevation) %>%
-  as.data.frame(xy = T, na.rm = T, centroids = T) %>%
-  remove_rownames %>%
-  as.tibble %>%
-  mutate(settlement = 1:n(), x = round(x, 6), y = round(y, 6)) %>%   # the coordinates here and in the environment raster need to be rounded to correct for floating point inequality issues
-  select(-layer) %>%
-  mutate(households = init_households,
-         households = map(households, create.households))
 ```
