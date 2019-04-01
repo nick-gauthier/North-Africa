@@ -73,9 +73,11 @@ Barbarossa, V et al. figshare https://dx.doi.org/10.6084/m9.figshare.c.3890224
 streamflow <- brick('data/topography/FLO1K.5min.ts.1960.2015.nc/FLO1K.5min.ts.1960.2015.qav.nc') %>%
   crop(bbox_ll) %>%
   mean(na.rm = T) %>%
-  projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m", method = 'ngb') %>%
+  projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
   crop(bbox_utm) %>%
   mask(as(boundary, 'Spatial')) 
+
+plot(streamflow)
 ```
 
 ```{r}
@@ -87,51 +89,55 @@ hex <- boundary %>%
          arable = raster::extract(slope <= 5, ., fun = sum, na.rm = TRUE) / raster::extract(setValues(slope, 1), ., fun = sum, na.rm = TRUE),
          cultivable_area = area * arable,
          max_veg_stage = raster::extract(max_veg_stage, ., fun = modal, na.rm = TRUE),
-         streamflow = raster::extract(streamflow, ., fun = sum, na.rm = TRUE)) %>%
+         streamflow = raster::extract(streamflow, ., fun = mean, na.rm = TRUE)) %>%
   filter(cultivable_area >= 1) # need at least 1km2
 ```
 
 
 ```{r}
 e1 <- ggplot(hex) +
-geom_sf(aes(fill = precipitation, color = precipitation)) +
-  scale_fill_distiller(palette = 'YlGnBu', direction = 1) +
-    scale_color_distiller(palette = 'YlGnBu', direction = 1) +
+geom_sf(aes(fill = precipitation * 1000, color = precipitation * 1000)) +
+  scale_fill_distiller(palette = 'YlGnBu', direction = 1, name = 'Total (mm)') +
+    scale_color_distiller(palette = 'YlGnBu', direction = 1, name  = 'Total (mm)') +
+  labs(subtitle = 'Annual precipitation') +
   coord_sf(datum = NA) +
   theme_void()
 
 e2 <- ggplot(hex) +
   geom_sf(aes(fill = cultivable_area, color = cultivable_area)) +
-    scale_fill_viridis_c() +
-  scale_color_viridis_c() +
+    scale_fill_viridis_c(name = 'Area (ha)') +
+  scale_color_viridis_c(name = 'Area (ha)') +
+  labs(subtitle = 'Arable land') +
   coord_sf(datum = NA) +
   theme_void()
 
 lc_colors <- c('#fffbc3', '#dcce00', '#97bf47', '#018200')
+lc_labels <- c('barren', 'grass', 'shrub', 'woodland')
 e3 <- hex %>%
-  mutate(stage = as.factor(max_veg_stage)) %>%
+  mutate(Stage = as.factor(max_veg_stage)) %>%
 ggplot() +
-  geom_sf(aes(fill = stage, color = stage)) +
-  scale_fill_manual(values = lc_colors) +
-  scale_fill_manual(values = lc_colors) +
+  geom_sf(aes(fill = Stage, color = Stage)) +
+  scale_fill_manual(values = lc_colors, labels = lc_labels) +
+  scale_color_manual(values = lc_colors, labels = lc_labels) +
+  labs(subtitle = 'Potential natural vegetation') +
   coord_sf(datum = NA) +
   theme_void()
 
 e4 <- ggplot(hex) +
   geom_sf(aes(fill = streamflow, color = streamflow)) +
   coord_sf(datum = NA) +
-  scale_fill_distiller(palette = 'BrBG', direction = 1) +
-    scale_color_distiller(palette = 'BrBG', direction = 1) +
+  scale_fill_distiller(palette = 'BrBG', direction = 1, name = 'Volume (m3/s)') +
+    scale_color_distiller(palette = 'BrBG', direction = 1, name = 'Volume (m3/s)') +
+  labs(subtitle = 'Streamflow') +
   theme_void()
 
-e1 + e2 + e3 + e4
+e1 + e2 + e3 + e4 + plot_annotation(title = 'Environmental inputs')
+ggsave('environmental_inputs.png', height = 4, width = 6)
 ```
 
 
 
 ```{r}
-
-
 tbl_graph(nodes = read_csv('data/orbis_nodes_0514.csv'),
           edges = read_csv('data/orbis_edges_0514.csv'))
 ```
