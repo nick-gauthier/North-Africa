@@ -28,7 +28,8 @@ bbox_utm <- extent(345000, 735000, 3780000, 4150000)
 ```
 
 ```{r}
-prec <- brick('data/CHELSA/prec_1km.tif') %>% 
+prec <- brick('data/CHELSA/prec_1km.tif') %>%
+  .[[c(1:5, 10:12)]] %>% # extract october -- may
   sum %>% 
   `/`(1000) %>%
   projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
@@ -79,6 +80,19 @@ streamflow <- brick('data/topography/FLO1K.5min.ts.1960.2015.nc/FLO1K.5min.ts.19
 
 plot(streamflow)
 ```
+```{r}
+runoff <- list.files('~/Downloads/TerraClimate/', full.names = TRUE, pattern = '*.nc') %>%
+  map(brick) %>%
+  map(~crop(., bbox_ll)) %>%
+  map(~sum(.)) %>%
+  brick %>%
+  mean %>%
+  projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m") %>%
+  crop(bbox_utm) %>%
+  mask(as(boundary, 'Spatial')) 
+
+plot(runoff)
+```
 
 ```{r}
 hex <- boundary %>%
@@ -89,7 +103,8 @@ hex <- boundary %>%
          arable = raster::extract(slope <= 5, ., fun = sum, na.rm = TRUE) / raster::extract(setValues(slope, 1), ., fun = sum, na.rm = TRUE),
          cultivable_area = area * arable,
          max_veg_stage = raster::extract(max_veg_stage, ., fun = modal, na.rm = TRUE),
-         streamflow = raster::extract(streamflow, ., fun = mean, na.rm = TRUE)) %>%
+         streamflow = raster::extract(streamflow, ., fun = mean, na.rm = TRUE),
+         runoff = raster::extract(runoff, ., fun = mean, na.rm = TRUE)) %>%
   filter(cultivable_area >= 1) # need at least 1km2
 ```
 
@@ -105,8 +120,8 @@ geom_sf(aes(fill = precipitation * 1000, color = precipitation * 1000)) +
 
 e2 <- ggplot(hex) +
   geom_sf(aes(fill = cultivable_area, color = cultivable_area)) +
-    scale_fill_viridis_c(name = 'Area (ha)') +
-  scale_color_viridis_c(name = 'Area (ha)') +
+    scale_fill_viridis_c(name = 'Area (km2)') +
+  scale_color_viridis_c(name = 'Area (km2)') +
   labs(subtitle = 'Arable land') +
   coord_sf(datum = NA) +
   theme_void()
@@ -132,9 +147,22 @@ e4 <- ggplot(hex) +
   theme_void()
 
 e1 + e2 + e3 + e4 + plot_annotation(title = 'Environmental inputs')
-ggsave('environmental_inputs.png', height = 4, width = 6)
+ggsave('environmental_inputs.pdf', height = 8, width = 12)
 ```
 
+```{r}
+write_sf(hex, 'NA_env.shp')
+
+hex %>%
+  mutate(streamflow_annual = streamflow * 3.154e+7,
+        runoff = streamflow_annual / (cultivable_area * 1000000)) %>%
+ggplot() +
+  geom_sf(aes(fill = runoff > .5, color = runoff>.5)) +
+    scale_fill_viridis_d() +
+  scale_color_viridis_d() +
+  coord_sf(datum = NA) +
+  theme_void()
+```
 
 
 ```{r}
