@@ -60,7 +60,7 @@ max_veg_stage <- raster('data/MODIS/veg_stage.tif') %>%
 ```
 
 ```{r}
-prec_annual_1km <- brick('data/CCSM4/prec_annual_1km.tif') %>%
+prec_200 <- brick('data/CCSM4/prec_annual_1km.tif') %>%
    crop(bbox_ll) %>%
   `/`(1000) %>%
   projectRaster(crs = "+proj=utm +zone=32 +north +ellps=WGS84 +datum=WGS84 +units=m", method = 'ngb') %>%
@@ -95,6 +95,22 @@ plot(runoff)
 ```
 
 ```{r}
+m1 <- prec %>%
+  projectRaster(runoff) %>%
+  brick(runoff, .) %>%
+  as.data.frame(xy = TRUE, na.rm = TRUE) %>%
+  rename(runoff = layer.1, prec = layer.2) %>%
+  as.tbl() %>%
+  mgcv::gam(runoff ~ s(prec), data = ., family = Gamma(link = 'log'), method = 'REML', select = TRUE)
+
+runoff_200 <- prec_200 %>%
+  mean %>%
+  setNames('prec') %>%
+  predict(m1, type = 'response') %>%
+  projectRaster(runoff)
+```
+
+```{r}
 hex <- boundary %>%
   st_make_grid(cellsize = 7000, square = FALSE) %>%
   st_sf %>%
@@ -104,7 +120,9 @@ hex <- boundary %>%
          cultivable_area = area * arable,
          max_veg_stage = raster::extract(max_veg_stage, ., fun = modal, na.rm = TRUE),
          streamflow = raster::extract(streamflow, ., fun = mean, na.rm = TRUE),
-         runoff = raster::extract(runoff, ., fun = mean, na.rm = TRUE)) %>%
+         runoff = raster::extract(runoff, ., fun = mean, na.rm = TRUE),
+         precipitation_200 = raster::extract(mean(prec_200), ., fun = mean, na.rm = TRUE),
+        runoff_200 = raster::extract(runoff_200, ., fun = mean, na.rm = TRUE)) %>%
   filter(cultivable_area >= 1) # need at least 1km2
 ```
 
@@ -179,6 +197,42 @@ hyde <- raster('../North-Africa/cropland200AD.asc') %>%
 
 plot(hyde)
 ```
+
+
+## simulation results
+
+```{r}
+sim1 <- readRDS('experiments/eqpop_nomigration_noirrigation')
+sim2 <- readRDS('experiments/eqpop_nomigration_irrigation')
+sim3 <- readRDS('experiments/eqpop_nomigration_noirrigation_CE200')
+sim4 <- readRDS('experiments/eqpop_nomigration_irrigation_CE200')
+```
+
+```{r fig.width = 9, fig.height = 9}
+sim_dat <- rbind(sim1, sim2, sim3, sim4) %>%
+  mutate(irrigation = as.factor(rep(rep(c('No Irrigation', 'Runoff Harvesting'), each = 2453), 2)),
+          time = as.factor(rep(c('Present day', '200 CE'), each = 4906)),
+         population = map_dbl(sim, ~.$population)) %>%
+    select(-sim) %>% 
+  mutate(population = na_if(population, 0))
+
+population_annotation <- sim_dat %>%
+  group_by(irrigation, time) %>%
+  summarise(population = round(sum(population, na.rm = TRUE) / 1000000, 1)) %>%
+  mutate(population = paste('Total:', population, 'million'))
+
+ggplot(sim_dat) +
+  geom_sf(aes(fill = population), color = 'grey60', lwd = .05) +
+  coord_sf(datum = NA) +
+  facet_grid(irrigation ~ time) +
+  scale_fill_viridis_c(na.value = 'white') +
+  ggtitle('Equilbirium population after 600 years', 'With and without runoff irrigation, 200 CE and present day') +
+  geom_text(data = population_annotation, aes(x = 500000, y = 3800000, label = population)) +
+  theme_void()
+
+ggsave('test.pdf', height = 9, width = 9)
+```
+
 
 # Environment
 
